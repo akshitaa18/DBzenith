@@ -32,6 +32,7 @@ from app.services.rl.contracts import (
     WritePenalty,
 )
 from app.services.rl.reward import RewardCalculator
+from app.services.rewriter import get_rewrite_engine
 
 
 class ProductionMutationForbiddenError(RuntimeError):
@@ -204,15 +205,27 @@ class DatabaseOptimizationEnv(gym.Env):
             )
 
         if action == ActionType.REWRITE_QUERY:
+            engine = get_rewrite_engine()
+            sample_query = "SELECT order_id, customer_id, total_amount FROM telemetry_demo_orders WHERE status = 'shipped' OR status = 'delivered'"
+            rewrite_res = engine.rewrite(sample_query, validate_sandbox=False)
             return RLRecommendation(
                 action_type=action,
                 action_name=action.name,
                 target_table="telemetry_demo_orders",
-                target_columns=["*"],
-                proposed_change="REWRITE: Project explicit columns instead of SELECT * and pushdown predicates.",
-                reason="Query exhibits wide projected rows and low buffer efficiency.",
+                target_columns=["status"],
+                proposed_change=f"AST Rewrite ({rewrite_res.transformation}): {rewrite_res.rewritten_query}",
+                reason=rewrite_res.reason,
                 expected_benefit_pct=25.0,
-                risk_score=0.15,
+                risk_score=0.10,
+                metadata={
+                    "original_query": rewrite_res.original_query,
+                    "rewritten_query": rewrite_res.rewritten_query,
+                    "transformation": rewrite_res.transformation,
+                    "reason": rewrite_res.reason,
+                    "expected_benefit": rewrite_res.expected_benefit,
+                    "confidence": rewrite_res.confidence,
+                    "validation_status": rewrite_res.validation_status,
+                },
             )
 
         if action == ActionType.PARTITION_TABLE:
