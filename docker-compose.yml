@@ -22,7 +22,9 @@ services:
       start_period: 5s
 
   sandbox-db:
-    image: postgres:17-alpine
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
     container_name: dbzenith-sandbox-db
     restart: unless-stopped
     environment:
@@ -31,6 +33,7 @@ services:
       POSTGRES_PASSWORD: ${SANDBOX_POSTGRES_PASSWORD:-change_me_sandbox_only}
     volumes:
       - sandbox_db_data:/var/lib/postgresql/data
+      - ./sandbox/initdb/10-hypopg.sql:/docker-entrypoint-initdb.d/10-hypopg.sql:ro
     networks:
       - sandbox_net
     healthcheck:

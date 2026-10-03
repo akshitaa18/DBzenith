@@ -1,0 +1,25 @@
+{
+  "seed": 20261003,
+  "dataset_size": 250,
+  "train_size": 200,
+  "validation_size": 50,
+  "labels": [
+    "none",
+    "sequential_scan",
+    "nested_loop",
+    "expensive_sort",
+    "row_estimation_error"
+  ],
+  "feature_count": 21,
+  "pyg_available": false,
+  "baseline": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "support": 80
+  },
+  "gnn": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "support": 80
+  }
+}

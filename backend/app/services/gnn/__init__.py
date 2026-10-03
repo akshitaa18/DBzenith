@@ -1,1 +1,1 @@
-"""Future gnn service boundary for DBZenith v0.1."""
+"""Future gnn service boundary for DBZenith v0.4."""

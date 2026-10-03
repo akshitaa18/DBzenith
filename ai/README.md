@@ -1,5 +1,5 @@
 # AI
 
-AI functionality is intentionally not implemented in DBZenith v0.1.
+AI functionality is intentionally not implemented in DBZenith v0.3.
 
-Future GNN, reinforcement-learning, and LangGraph components must accept only sanitized workload representations from the privacy boundary. Raw production data, credentials, tokens, and unsanitized literals must never enter this tree.
+When GNN, reinforcement-learning, or agent components are added, they must consume `AIWorkloadRecord` only through the privacy boundary. `RawQuery` and `RawPlan` are never valid AI inputs.

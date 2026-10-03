@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     telemetry_relation_limit: int = 100
     collect_explain: bool = True
     explain_query_limit: int = 50
+    simulation_max_rows_per_table: int = 25_000
+    simulation_max_timeout_ms: int = 30_000
+    simulation_max_benchmark_runs: int = 5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

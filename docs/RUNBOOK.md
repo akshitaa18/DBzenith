@@ -1,4 +1,4 @@
-# DBZenith v0.2 Runbook
+# DBZenith v0.6 Runbook
 
 ## Clean start
 
@@ -60,3 +60,17 @@ This removes only the local development database volumes and recreates them.
 ```powershell
 docker compose down
 ```
+
+
+## Optimization simulation
+
+After a clean v0.6 startup, run the workload and open the dashboard. For a pending index recommendation, click **Simulate impact**. The API is also available at `POST /api/v1/simulations`.
+
+For an upgrade from v0.5, recreate the sandbox volume once so the HypoPG initialization script runs:
+
+```powershell
+docker compose down -v
+docker compose up --build -d
+```
+
+Never point `SANDBOX_DATABASE_URL` at the production database.

@@ -1,4 +1,4 @@
-# DBZenith v0.2 Verification Record
+# DBZenith v0.6 Verification Record
 
 ## Verified in the build environment
 
@@ -14,7 +14,7 @@
 
 The execution environment used to prepare this artifact did not expose the Docker CLI, so a live Docker Compose PostgreSQL runtime could not be executed here.
 
-The v0.2 runtime is configured for PostgreSQL 17 with `pg_stat_statements`, `compute_query_id=on`, `pg_stat_statements.track=all`, and `track_io_timing=on`. The backend migration creates the extension after the server starts.
+The v0.5 runtime is configured for PostgreSQL 17 with `pg_stat_statements`, `compute_query_id=on`, `pg_stat_statements.track=all`, and `track_io_timing=on`. The backend migration creates the extension after the server starts.
 
 Run the full runtime verification on the development machine:
 
@@ -30,3 +30,11 @@ Invoke-WebRequest "http://localhost:8000/api/v1/queries/slow?page=1&page_size=20
 ```
 
 Then refresh `http://localhost:8080`.
+
+
+## v0.6 sandbox verification
+
+- unit suite passes without a live PostgreSQL server
+- integration coverage includes sandbox isolation, HypoPG plan comparison, benchmark cleanup, and production-index preservation
+- the integration sandbox test is skipped unless both production and sandbox PostgreSQL endpoints are available
+- Docker image build/runtime must be verified on a machine with Docker because this artifact build environment does not provide Docker

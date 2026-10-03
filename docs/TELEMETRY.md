@@ -1,6 +1,6 @@
-# DBZenith v0.2 PostgreSQL Workload Telemetry
+# DBZenith v0.4 PostgreSQL Workload Telemetry
 
-DBZenith v0.2 collects real PostgreSQL workload telemetry. Application endpoints do not fabricate query statistics.
+DBZenith v0.4 collects real PostgreSQL workload telemetry. Application endpoints do not fabricate query statistics.
 
 ## Sources
 

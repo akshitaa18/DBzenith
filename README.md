@@ -1,8 +1,8 @@
-# DBZenith v0.2
+# DBZenith v0.6
 
 DBZenith is a privacy-preserving autonomous PostgreSQL performance optimization platform under incremental development.
 
-## v0.2 includes
+## v0.6 includes
 
 - FastAPI backend with typed configuration
 - PostgreSQL + SQLAlchemy
@@ -21,9 +21,13 @@ DBZenith is a privacy-preserving autonomous PostgreSQL performance optimization 
 - EXPLAIN FORMAT JSON capture for eligible statements
 - Optional pg_qualstats predicate collection
 - Real synthetic PostgreSQL development workload
+- Privacy Gateway with sanitized execution-plan boundary
+- Real execution-plan parser, graph model, feature extraction, bottleneck detection, and explanation engine
+- Persisted plan analyses and plan-analysis APIs
+- Frontend execution-plan visualization using real PostgreSQL plan data
 - Architectural/security documentation
 
-AI/ML optimization functionality is deliberately not implemented yet. v0.2 is focused on the real telemetry foundation that later optimization components will consume.
+DBZenith v0.6 adds an isolated PostgreSQL optimization sandbox with HypoPG-backed index simulations. AI/ML optimization remains outside this release scope.
 
 ## Telemetry workflow
 
@@ -190,3 +194,25 @@ docker compose down
 ## Security
 
 Read `SECURITY.md` before adding telemetry, AI, or production connectivity.
+
+## Privacy Gateway (v0.6)
+
+DBZenith v0.6 adds the mandatory privacy gateway: SQL AST/token parsing, literal masking, structural hashing, identifier tokenization, execution-plan sanitization, policy validation, AI-boundary contracts, and security audit logging. GNN/RL/agent execution is intentionally not implemented yet.
+
+
+## v0.6 execution-plan analysis
+
+DBZenith now analyzes real PostgreSQL `EXPLAIN (FORMAT JSON)` plans through a privacy-gated plan parser, graph model, feature extractor, deterministic bottleneck detector, and explanation engine. See `docs/PLANS.md`.
+
+## Optimization Recommendations
+
+DBZenith v0.6 adds deterministic Index, Partition, Query Rewrite, and Join Strategy advisors. Recommendations are persisted, require explicit approval, and never execute production DDL. Approve/reject actions are audit logged. GNN/RL are not implemented.
+
+
+## v0.6 isolated optimization sandbox
+
+See `docs/SIMULATIONS.md`. Index recommendations can be validated with `POST /api/v1/simulations` using a separate PostgreSQL 17 sandbox database. Simulation execution and benchmarks never modify production tables, and the sandbox is cleaned after each run.
+
+## v0.7 learned plan analysis
+
+DBZenith now includes a versioned GNN bottleneck-prediction subsystem trained only on reproducible synthetic sanitized-plan graphs. See `docs/GNN.md`. Learned inference is advisory; deterministic plan analysis remains the fallback.

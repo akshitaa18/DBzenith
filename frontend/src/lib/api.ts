@@ -74,3 +74,113 @@ export function getQueryDetail(queryId: number): Promise<QueryDetail> {
 export function getWorkloadSummary(): Promise<WorkloadSummary> {
   return request('/api/v1/workload/summary')
 }
+
+
+export type PlanAnalysis = {
+  id: number
+  created_at: string
+  query_id: number | null
+  structural_hash: string
+  sanitized_plan: unknown
+  graph: { root_id: string; nodes: any[]; edges: Array<{ from: string; to: string }> }
+  features: Record<string, number>
+  bottlenecks: Array<{ type: string; severity: string; evidence: Record<string, unknown>; affected_node: string; explanation: string; possible_remediation: string }>
+  explanation: { summary: string; feature_highlights: Record<string, number>; method: string; gnn?: any }
+}
+
+export async function analyzePlan(sql: string): Promise<PlanAnalysis> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/plans/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  })
+  if (!response.ok) throw new Error(`Plan analysis failed: ${response.status}`)
+  return response.json()
+}
+
+export function getPlanAnalysis(id: number): Promise<PlanAnalysis> {
+  return request(`/api/v1/plans/${id}`)
+}
+
+export type Recommendation = {
+  id: number
+  created_at: string
+  updated_at: string | null
+  type: string
+  target: string
+  proposed_change: string
+  reason: string
+  evidence: Record<string, unknown>
+  expected_benefit: string
+  risk: string
+  confidence: number
+  affected_queries: Array<Record<string, unknown>>
+  requires_approval: boolean
+  status: 'pending' | 'approved' | 'rejected'
+}
+
+export type RecommendationPage = {
+  items: Recommendation[]
+  page: number
+  page_size: number
+  total: number
+}
+
+export function getRecommendations(page = 1, pageSize = 20, status?: string): Promise<RecommendationPage> {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (status) params.set('status', status)
+  return request(`/api/v1/recommendations?${params}`)
+}
+
+async function decideRecommendation(id: number, action: 'approve' | 'reject', reason = 'operator decision'): Promise<Recommendation> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/recommendations/${id}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  })
+  if (!response.ok) throw new Error(`Recommendation ${action} failed: ${response.status}`)
+  return response.json()
+}
+
+export function approveRecommendation(id: number, reason?: string): Promise<Recommendation> {
+  return decideRecommendation(id, 'approve', reason)
+}
+
+export function rejectRecommendation(id: number, reason?: string): Promise<Recommendation> {
+  return decideRecommendation(id, 'reject', reason)
+}
+
+
+export type Simulation = {
+  id: number
+  created_at: string
+  recommendation_id: number | null
+  status: 'running' | 'completed' | 'failed'
+  baseline_cost: number | null
+  proposed_cost: number | null
+  improvement: number | null
+  affected_queries: Array<Record<string, unknown>>
+  plan_differences: Array<Record<string, unknown>>
+  estimated_storage_impact: Record<string, unknown>
+  write_overhead_estimate: Record<string, unknown>
+  confidence: number
+  limitations: string[]
+  benchmark: Record<string, unknown>
+  baseline_plans: Array<Record<string, unknown>>
+  proposed_plans: Array<Record<string, unknown>>
+  error: string | null
+}
+
+export async function createSimulation(recommendationId: number, benchmarkRuns = 3): Promise<Simulation> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/simulations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recommendation_id: recommendationId, benchmark_runs: benchmarkRuns }),
+  })
+  if (!response.ok) throw new Error(`Simulation failed: ${response.status}`)
+  return response.json()
+}
+
+export function getSimulation(id: number): Promise<Simulation> {
+  return request(`/api/v1/simulations/${id}`)
+}

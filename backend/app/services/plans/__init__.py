@@ -1,1 +1,3 @@
-"""Future plans service boundary for DBZenith v0.1."""
+from app.services.plans.analyzer import analyze_plan
+
+__all__ = ["analyze_plan"]

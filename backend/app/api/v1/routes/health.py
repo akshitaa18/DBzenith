@@ -12,7 +12,7 @@ settings = get_settings()
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", service=settings.app_name, version="0.2.0")
+    return HealthResponse(status="ok", service=settings.app_name, version="0.7.0")
 
 
 @router.get("/ready", response_model=ReadinessResponse)
