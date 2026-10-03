@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { analyzePlan, approveRecommendation, createSimulation, getHealth, getRecommendations, getSlowQueries, getWorkloadSummary, rejectRecommendation, type PlanAnalysis, type QueryDetail, type Recommendation, type Simulation, type WorkloadSummary } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
+import { ConversationalDBA } from '../components/ConversationalDBA'
+
 
 function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
@@ -97,7 +99,10 @@ export function Dashboard() {
         <article className="card"><h2>Total execution</h2><strong>{summary ? formatMs(summary.total_exec_time_ms) : '—'}</strong><p>Cumulative execution time</p></article>
       </div>
 
+      <ConversationalDBA />
+
       <article className="card section-card">
+
         <div className="section-heading"><h2>Top workload</h2><span>{summary?.captured_at ? new Date(summary.captured_at).toLocaleString() : 'No snapshot yet'}</span></div>
         {summary?.top_queries.length ? (
           <div className="table-wrap"><table><thead><tr><th>Query ID</th><th>Calls</th><th>Mean</th><th>Total</th><th>Query</th></tr></thead>

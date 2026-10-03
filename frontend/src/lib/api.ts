@@ -184,3 +184,49 @@ export async function createSimulation(recommendationId: number, benchmarkRuns =
 export function getSimulation(id: number): Promise<Simulation> {
   return request(`/api/v1/simulations/${id}`)
 }
+
+export type AssistantChatResponse = {
+  session_id: string
+  response: string
+  safety_check_passed: boolean
+  safety_violation_reason: string | null
+  evidence: Record<string, unknown>
+  analysis: Record<string, unknown>
+  recommendations: Array<Record<string, unknown>>
+  simulations: Array<Record<string, unknown>>
+  approval_request: {
+    approval_request?: {
+      recommendation_id: number
+      proposed_change: string
+      status: string
+      agent_approved: boolean
+    }
+    status?: string
+    message?: string
+  } | null
+  audit_trail: Array<{
+    timestamp: string
+    event_type: string
+    tool_name?: string
+    output_summary?: string
+  }>
+}
+
+export async function sendAssistantMessage(
+  message: string,
+  sessionId?: string,
+  role = 'dba'
+): Promise<AssistantChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assistant/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId, role }),
+  })
+  if (!response.ok) throw new Error(`Assistant chat failed: ${response.status}`)
+  return response.json()
+}
+
+export function getAssistantTools(): Promise<Array<{ name: string; description: string }>> {
+  return request('/api/v1/assistant/tools')
+}
+
