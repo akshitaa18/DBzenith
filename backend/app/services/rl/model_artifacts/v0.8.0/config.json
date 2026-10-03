@@ -1,0 +1,12 @@
+{
+  "model_type": "DQN",
+  "state_dim": 38,
+  "action_dim": 6,
+  "gamma": 0.95,
+  "epsilon_final": 0.299744224018491,
+  "train_steps": 2158,
+  "episodes": 150,
+  "version": "v0.8.0",
+  "learning_rate": 0.001,
+  "max_steps": 15
+}

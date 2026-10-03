@@ -1,0 +1,66 @@
+{
+  "rl_agent": {
+    "policy_name": "dqn_optimization_agent",
+    "num_episodes": 50,
+    "total_actions": 1000,
+    "mean_reward": 25.701,
+    "std_reward": 8.16,
+    "mean_latency_improvement_pct": 27.1,
+    "mean_throughput_improvement_pct": 41.24,
+    "mean_storage_delta_mb": 2.94,
+    "mean_write_overhead": 0.137,
+    "mean_cpu_delta_pct": -9.67,
+    "regression_rate_pct": 0.0,
+    "action_distribution": {
+      "NO_OP": 139,
+      "CREATE_INDEX": 15,
+      "DROP_INDEX": 6,
+      "REWRITE_QUERY": 294,
+      "PARTITION_TABLE": 540,
+      "CHANGE_JOIN_STRATEGY": 6
+    }
+  },
+  "baseline_policy": {
+    "policy_name": "rule_based_baseline",
+    "num_episodes": 50,
+    "total_actions": 1000,
+    "mean_reward": 21.789,
+    "std_reward": 9.573,
+    "mean_latency_improvement_pct": 20.74,
+    "mean_throughput_improvement_pct": 28.9,
+    "mean_storage_delta_mb": 0.55,
+    "mean_write_overhead": 0.007,
+    "mean_cpu_delta_pct": -10.11,
+    "regression_rate_pct": 0.0,
+    "action_distribution": {
+      "NO_OP": 182,
+      "CREATE_INDEX": 43,
+      "DROP_INDEX": 22,
+      "REWRITE_QUERY": 736,
+      "PARTITION_TABLE": 0,
+      "CHANGE_JOIN_STRATEGY": 17
+    }
+  },
+  "random_policy": {
+    "policy_name": "random_baseline",
+    "num_episodes": 50,
+    "total_actions": 884,
+    "mean_reward": -13.858,
+    "std_reward": 11.535,
+    "mean_latency_improvement_pct": 6.2,
+    "mean_throughput_improvement_pct": 16.42,
+    "mean_storage_delta_mb": 2.12,
+    "mean_write_overhead": 0.067,
+    "mean_cpu_delta_pct": -3.89,
+    "regression_rate_pct": 26.24,
+    "action_distribution": {
+      "NO_OP": 144,
+      "CREATE_INDEX": 147,
+      "DROP_INDEX": 135,
+      "REWRITE_QUERY": 154,
+      "PARTITION_TABLE": 139,
+      "CHANGE_JOIN_STRATEGY": 165
+    }
+  },
+  "markdown_table": "| Metric | Trainable RL (DQN) | Baseline Policy (Heuristic) | Random Policy |\n|---|---:|---:|---:|\n| Mean Episode Return | **25.701** | 21.789 | -13.858 |\n| Mean Latency Impr. (%) | **+27.1%** | +20.74% | 6.2% |\n| Mean Throughput Impr. (%) | **+41.24%** | +28.9% | 16.42% |\n| Mean Storage Delta (MB) | 2.94 MB | 0.55 MB | 2.12 MB |\n| Mean Write Overhead | 0.137 | 0.007 | 0.067 |\n| Regression Rate (%) | **0.0%** | 0.0% | 26.24% |\n"
+}
