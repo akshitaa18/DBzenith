@@ -10,7 +10,8 @@ from app.services.privacy.contracts import AIWorkloadRecord, SanitizedPlan, Sani
 _SECRET_PATTERNS = [
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"),
-    re.compile(r"\b(?:sk|pk|api[_-]?key|token|secret|access_token|refresh_token)[_-]?[A-Za-z0-9_-]{12,}\b", re.I),
+    re.compile(r"\b(?:sk|pk|api[_-]?key|secret|access_token|refresh_token|bearer_token)[_-]?[A-Za-z0-9_-]{12,}\b", re.I),
+    re.compile(r"\btoken[_-][A-Za-z0-9_-]{12,}\b", re.I),
     re.compile(r"\bpassword\s*[:=]\s*\S+", re.I),
     re.compile(r"\bpostgres(?:ql)?://[^\s\"']+", re.I),
     re.compile(r"\b(?:bearer\s+[A-Za-z0-9._\-]{20,})\b", re.I),
@@ -51,13 +52,18 @@ class PrivacyPolicyEngine:
     @staticmethod
     def _contains_secret(value: str) -> bool:
         for pattern in _SECRET_PATTERNS:
-            if pattern.search(value):
+            m = pattern.search(value)
+            if m:
+                import logging
+                logging.getLogger("privacy").warning(f"_contains_secret pattern match: {pattern.pattern} matched {m.group(0)}")
                 return True
         # IPv4 values should never survive sanitization.
         for token in value.split():
-            try:
-                ipaddress.ip_address(token.strip("(),;"))
-                return True
-            except ValueError:
-                continue
+            clean = token.strip("(),;'\"[]{}")
+            if clean and clean.count(".") == 3:
+                try:
+                    ipaddress.ip_address(clean)
+                    return True
+                except ValueError:
+                    continue
         return False

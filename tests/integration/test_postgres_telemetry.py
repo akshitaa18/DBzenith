@@ -3,10 +3,13 @@ import os
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.core.config import get_settings
+from app.db.session import get_engine, get_session_factory
 from app.services.collector.telemetry import TelemetryCollector
 
-
 DATABASE_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL") or os.getenv("DATABASE_URL")
+if not DATABASE_URL and get_settings().database_url.startswith("postgresql"):
+    DATABASE_URL = get_settings().database_url.replace("@db:5432", "@localhost:5432")
 
 
 def _postgres_available() -> bool:
@@ -19,6 +22,15 @@ def _postgres_available() -> bool:
         return True
     except Exception:
         return False
+
+
+@pytest.fixture(autouse=True)
+def configure_integration_db():
+    if DATABASE_URL:
+        os.environ["DATABASE_URL"] = DATABASE_URL
+        get_settings.cache_clear()
+        get_engine.cache_clear()
+        get_session_factory.cache_clear()
 
 
 pytestmark = pytest.mark.integration

@@ -115,43 +115,55 @@ class TelemetryCollector:
             return snapshot
 
     def _query_stats(self, db: Session) -> list[dict]:
-        result = db.execute(
-            text(
-                """
-                SELECT
-                    s.userid,
-                    s.dbid,
-                    s.queryid,
-                    s.query,
-                    s.calls,
-                    s.total_exec_time,
-                    s.mean_exec_time,
-                    s.min_exec_time,
-                    s.max_exec_time,
-                    s.rows,
-                    s.shared_blks_hit,
-                    s.shared_blks_read,
-                    s.shared_blks_dirtied,
-                    s.shared_blks_written,
-                    s.local_blks_hit,
-                    s.local_blks_read,
-                    s.temp_blks_read,
-                    s.temp_blks_written,
-                    s.blk_read_time,
-                    s.blk_write_time,
-                    d.datname AS database_name,
-                    u.rolname AS user_name
-                FROM pg_stat_statements s
-                LEFT JOIN pg_database d ON d.oid = s.dbid
-                LEFT JOIN pg_roles u ON u.oid = s.userid
-                WHERE s.queryid IS NOT NULL
-                  AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-                ORDER BY s.total_exec_time DESC
-                LIMIT :limit
-                """
-            ),
-            {"limit": self.settings.telemetry_query_limit},
-        ).mappings().all()
+        # Check available columns in pg_stat_statements for compatibility with PG17+ and older versions
+        col_rows = db.execute(
+            text("SELECT column_name FROM information_schema.columns WHERE table_name = 'pg_stat_statements'")
+        ).fetchall()
+        col_names = {r[0] for r in col_rows}
+
+        if "blk_read_time" in col_names:
+            blk_read_expr = "s.blk_read_time"
+            blk_write_expr = "s.blk_write_time"
+        elif "shared_blk_read_time" in col_names:
+            blk_read_expr = "COALESCE(s.shared_blk_read_time + s.local_blk_read_time, 0.0) AS blk_read_time"
+            blk_write_expr = "COALESCE(s.shared_blk_write_time + s.local_blk_write_time, 0.0) AS blk_write_time"
+        else:
+            blk_read_expr = "0.0 AS blk_read_time"
+            blk_write_expr = "0.0 AS blk_write_time"
+
+        query_sql = f"""
+            SELECT
+                s.userid,
+                s.dbid,
+                s.queryid,
+                s.query,
+                s.calls,
+                s.total_exec_time,
+                s.mean_exec_time,
+                s.min_exec_time,
+                s.max_exec_time,
+                s.rows,
+                s.shared_blks_hit,
+                s.shared_blks_read,
+                s.shared_blks_dirtied,
+                s.shared_blks_written,
+                s.local_blks_hit,
+                s.local_blks_read,
+                s.temp_blks_read,
+                s.temp_blks_written,
+                {blk_read_expr},
+                {blk_write_expr},
+                d.datname AS database_name,
+                u.rolname AS user_name
+            FROM pg_stat_statements s
+            LEFT JOIN pg_database d ON d.oid = s.dbid
+            LEFT JOIN pg_roles u ON u.oid = s.userid
+            WHERE s.queryid IS NOT NULL
+              AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+            ORDER BY s.total_exec_time DESC
+            LIMIT :limit
+        """
+        result = db.execute(text(query_sql), {"limit": self.settings.telemetry_query_limit}).mappings().all()
         return [dict(row) for row in result]
 
     def _relation_stats(self, db: Session) -> list[dict]:

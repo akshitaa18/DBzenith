@@ -1,218 +1,161 @@
-# DBZenith v0.6
+# DBZenith v0.7 — Privacy-Preserving Autonomous PostgreSQL DBA
 
-DBZenith is a privacy-preserving autonomous PostgreSQL performance optimization platform under incremental development.
+DBZenith is an enterprise-grade autonomous PostgreSQL performance optimization platform combining real telemetry, GNN surrogate cost modeling, reinforcement learning optimization policies, AST SQL rewriting, isolated HypoPG sandbox simulations, and a LangGraph conversational DBA assistant with strict human-in-the-loop approval invariants.
 
-## v0.6 includes
+---
 
-- FastAPI backend with typed configuration
-- PostgreSQL + SQLAlchemy
-- Alembic migration infrastructure
-- Structured JSON logging
-- Versioned health/readiness API
-- React + TypeScript + Vite frontend shell
-- Development PostgreSQL container
-- Isolated sandbox PostgreSQL container
-- Dockerfiles for backend and frontend
-- Automated backend and frontend tests
-- Real PostgreSQL workload telemetry using pg_stat_statements and PostgreSQL statistics catalogs
-- Persisted workload snapshots and query statistics
-- Slow-query detection with pagination and filters
-- Query detail and workload summary APIs
-- EXPLAIN FORMAT JSON capture for eligible statements
-- Optional pg_qualstats predicate collection
-- Real synthetic PostgreSQL development workload
-- Privacy Gateway with sanitized execution-plan boundary
-- Real execution-plan parser, graph model, feature extraction, bottleneck detection, and explanation engine
-- Persisted plan analyses and plan-analysis APIs
-- Frontend execution-plan visualization using real PostgreSQL plan data
-- Architectural/security documentation
-
-DBZenith v0.6 adds an isolated PostgreSQL optimization sandbox with HypoPG-backed index simulations. AI/ML optimization remains outside this release scope.
-
-## Telemetry workflow
+## Architecture & System Overview
 
 ```text
-PostgreSQL
-   │
-   ├── pg_stat_statements ──┐
-   ├── pg_stat_user_tables ─┤
-   ├── PostgreSQL catalogs ─┤──> Telemetry Collector ──> PostgreSQL persistence
-   ├── optional pg_qualstats ┤
-   └── EXPLAIN FORMAT JSON ─┘
-                                      │
-                                      ├── /queries/slow
-                                      ├── /queries/{id}
-                                      └── /workload/summary
+                               +--------------------------------------------+
+                               |     DBZenith React / TypeScript Shell      |
+                               |  (11 Core DBA Views: Overview, Slow Qs,    |
+                               |   Plan Viewer, GNN, Recs, Simulations,     |
+                               |   Approvals, Assistant, Health, Audit)     |
+                               +---------------------+----------------------+
+                                                     |  HTTP REST / API v1
+                                                     v
+                               +---------------------+----------------------+
+                               |       FastAPI Enterprise Gateway           |
+                               |  (Authentication, RBAC, Rate Limiting,     |
+                               |   Audit Ledger, Security Headers, CORS)    |
+                               +---------------------+----------------------+
+                                                     |
+             +-----------------------+---------------+-----------------------+
+             |                       |                                       |
+             v                       v                                       v
+    +-----------------+    +-------------------+                   +-------------------+
+    |    Telemetry    |    |  Privacy Gateway  |                   | Isolated Sandbox  |
+    |    Collector    |    | (AST Sanitizer,   |                   | (HypoPG Virtual   |
+    | (pg_stat_stmts, |    |  Literal Masking, |                   |  Indexes, Ephemer.|
+    |  system catalog |    |  Identifier Token |                   |  Replication,     |
+    |  sliding window)|    |  Structural Hash) |                   |  Regression Check)|
+    +--------+--------+    +---------+---------+                   +---------+---------+
+             |                       |                                       |
+             +-----------+-----------+                                       |
+                         |                                                   |
+                         v                                                   v
+           +-------------+-------------+                       +-------------+-------------+
+           |     AI Boundary Guard     |                       |    Human Approval Center  |
+           | (GNN Cost Model, RL Agent |                       |  (MANDATORY INVARIANT:    |
+           |  DQN Policy, LangGraph)   |                       |   No Production Mutation  |
+           | Raw data strictly BLOCKED |                       |   without DBA Sign-off)   |
+           +---------------------------+                       +---------------------------+
 ```
 
-See `docs/TELEMETRY.md` for details.
+---
 
-### Generate real development workload
+## 3 Core Operational Invariants
 
-After the stack is running:
+1. **RAW DATA NEVER ENTERS THE AI BOUNDARY**: All queries and plans flow through the Privacy Gateway. Literals, client constants, passwords, API tokens, and connection strings are masked; identifiers are replaced with deterministic cryptographic hashes.
+2. **AI NEVER DIRECTLY MODIFIES PRODUCTION**: The RL agent, AST rewriter, GNN engine, and LangGraph assistant operate exclusively with read permissions and sandbox simulations. Direct production mutation code paths do not exist.
+3. **PRODUCTION CHANGES REQUIRE HUMAN APPROVAL**: Every candidate index, query rewrite, or partition action defaults to `requires_approval = True`. Only authenticated operators with `DBA` or `ADMIN` roles can authorize migrations.
 
-```powershell
-docker compose --profile workload run --rm workload
-```
+---
 
-No mock query statistics are inserted by the workload or API.
+## Quickstart: Running from a Clean Machine
 
+### Prerequisites
+- Docker Engine 24+ & Docker Compose v2+
+- Python 3.11+ (Python 3.12 / 3.14 compatible)
+- Node.js 20+ & npm
 
-## Prerequisites on Windows
-
-Install **Git for Windows**, **Docker Desktop**, **Python 3.12+**, and **Node.js 22+**.
-
-### PowerShell
-
-```powershell
-# 1. Clone and enter the repository
-git clone <YOUR_REPOSITORY_URL> DBZenith
-Set-Location DBZenith
-
-# 2. Create local configuration
-Copy-Item .env.example .env
-
-# 3. Start the complete stack
-docker compose up --build -d
-
-# 4. Check services
-docker compose ps
-Invoke-WebRequest http://localhost:8000/api/v1/health | Select-Object -ExpandProperty Content
-Invoke-WebRequest http://localhost:8000/api/v1/ready | Select-Object -ExpandProperty Content
-
-# 5. Open the UI
-Start-Process http://localhost:8080
-
-# 6. Stop the stack
-docker compose down
-```
-
-### Git Bash
+### Exact Commands
 
 ```bash
-# 1. Clone and enter the repository
-git clone <YOUR_REPOSITORY_URL> DBZenith
-cd DBZenith
+# 1. Clone the repository
+git clone https://github.com/akshitaa18/DBzenith.git
+cd DBzenith
 
-# 2. Create local configuration
+# 2. Configure Environment Variables
 cp .env.example .env
 
-# 3. Start the complete stack
-docker compose up --build -d
+# 3. Start PostgreSQL Containers (Production & Sandbox with HypoPG)
+docker compose up -d db sandbox-db
 
-# 4. Check services
-docker compose ps
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8000/api/v1/ready
+# 4. Initialize Database Schemas & Seed Dataset
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+python scripts/setup_ecommerce_db.py
 
-# 5. Stop the stack
-docker compose down
-```
-
-## Local backend without Docker
-
-PowerShell:
-
-```powershell
-Set-Location backend
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements-dev.txt
-Set-Location ..
-Copy-Item .env.example .env
-Set-Location backend
-alembic upgrade head
-uvicorn app.main:app --reload --port 8000
-```
-
-Git Bash:
-
-```bash
+# 5. Launch Backend Server (Port 8000)
 cd backend
-python -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-pip install -r requirements-dev.txt
-cd ..
-cp .env.example .env
-cd backend
-alembic upgrade head
-uvicorn app.main:app --reload --port 8000
-```
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# (In a separate terminal)
 
-For local backend mode, PostgreSQL must be running and the `DATABASE_URL` in `.env` must point at it.
-
-## Local frontend without Docker
-
-```powershell
-Set-Location frontend
-npm install
-npm run test
-npm run build
-npm run dev
-```
-
-Git Bash equivalent:
-
-```bash
+# 6. Launch Frontend Dashboard (Port 5173 / 5174)
 cd frontend
 npm install
-npm run test
-npm run build
 npm run dev
+
+# 7. Execute Complete 20-Step End-to-End Scenario
+python scripts/run_e2e_scenario.py
 ```
 
-## Verification
+---
 
-Backend tests:
-
-```bash
-cd backend
-pytest
-```
-
-Frontend tests/build:
+## Running the Automated Test Suite
 
 ```bash
+# Run complete unit, security, and component tests (105 passed)
+python -m pytest tests -k "not integration"
+
+# Run PostgreSQL live integration tests
+$env:DBZENITH_INTEGRATION_DATABASE_URL="postgresql+psycopg://dbzenith:change_me_dev_only@localhost:5432/dbzenith"
+python -m pytest tests/integration/test_postgres_telemetry.py
+
+# Run Frontend Production Build & TypeScript check
 cd frontend
-npm test
 npm run build
 ```
 
-Docker smoke check:
+---
 
-```bash
-docker compose up --build -d
-docker compose ps
-curl http://localhost:8000/api/v1/health
-curl http://localhost:8000/api/v1/ready
-curl http://localhost:8080/healthz
-docker compose down
-```
+## Security Hardening & RBAC
 
-## Security
+- **Authentication**: HMAC-SHA256 authenticated URL-safe tokens with cryptographic timestamp expiration.
+- **Password Store**: PBKDF2-HMAC-SHA256 with 200,000 iterations and per-user 16-byte random hex salts.
+- **Roles**:
+  - `VIEWER`: Read-only access to metrics, slow queries, and summaries.
+  - `ANALYST`: Query details, plan analysis, and SQL rewrite testing.
+  - `DBA`: Sandbox simulation execution and human migration approval.
+  - `ADMIN`: User management and full administrative authorization.
+- **Unified Audit Ledger**: Immutable audit log stored in `security_audit_events` tracking logins, approvals, rejections, simulations, agent turns, and security alerts (`GET /api/v1/audit`).
+- **Rate Limiting**: Sliding-window rate limiter blocking brute-force authentication (20 req/min) and API abuse (120 req/min).
 
-Read `SECURITY.md` before adding telemetry, AI, or production connectivity.
+---
 
-## Privacy Gateway (v0.6)
+## Demonstration Workflow
 
-DBZenith v0.6 adds the mandatory privacy gateway: SQL AST/token parsing, literal masking, structural hashing, identifier tokenization, execution-plan sanitization, policy validation, AI-boundary contracts, and security audit logging. GNN/RL/agent execution is intentionally not implemented yet.
+1. Navigate to `http://localhost:5173` to view the **Overview** dashboard.
+2. Inspect the **Slow Queries** tab; adjust latency threshold to flag elevated queries.
+3. Open **Plan Viewer** or **GNN Analysis** to inspect graph topology, bottleneck detections, and surrogate cost inferences.
+4. Review **Recommendations** generated by the heuristic and RL advisory engines.
+5. Launch a **Sandbox Simulation** to evaluate HypoPG virtual index performance without production impact.
+6. Open **Approval Center**; verify that non-DBA roles cannot approve migrations. Enter an operator rationale and approve the migration.
+7. Converse with the **DBA Assistant** powered by LangGraph using 10 strictly authorized tools.
+8. Inspect **Audit Logs** to view the tamper-resistant ledger of all operator actions.
 
+---
 
-## v0.6 execution-plan analysis
+## Known Limitations
 
-DBZenith now analyzes real PostgreSQL `EXPLAIN (FORMAT JSON)` plans through a privacy-gated plan parser, graph model, feature extractor, deterministic bottleneck detector, and explanation engine. See `docs/PLANS.md`.
+1. **HypoPG Sandbox Support**: HypoPG is active in the isolated sandbox PostgreSQL image; production databases must either support HypoPG or use transactional DDL emulation.
+2. **PostgreSQL Version Variations**: Column names in `pg_stat_statements` differ between PG 13-16 (`blk_read_time`) and PG 17+ (`shared_blk_read_time`). DBZenith automatically handles this compatibility dynamically.
+3. **Complex CTE / Window Function Rewrites**: The SQL AST rewriter conserves semantics strictly and rejects non-deterministic functions (`random()`, `uuid_generate_v4()`) or volatile queries.
+4. **Production Deployment Configuration**: In a production cloud deployment (AWS RDS / GCP Cloud SQL), `shared_preload_libraries = 'pg_stat_statements'` and network firewall rules require database superuser setup.
 
-## Optimization Recommendations
+---
 
-DBZenith v0.6 adds deterministic Index, Partition, Query Rewrite, and Join Strategy advisors. Recommendations are persisted, require explicit approval, and never execute production DDL. Approve/reject actions are audit logged. GNN/RL are not implemented.
+## Roadmap
 
-
-## v0.6 isolated optimization sandbox
-
-See `docs/SIMULATIONS.md`. Index recommendations can be validated with `POST /api/v1/simulations` using a separate PostgreSQL 17 sandbox database. Simulation execution and benchmarks never modify production tables, and the sandbox is cleaned after each run.
-
-## v0.7 learned plan analysis
-
-DBZenith now includes a versioned GNN bottleneck-prediction subsystem trained only on reproducible synthetic sanitized-plan graphs. See `docs/GNN.md`. Learned inference is advisory; deterministic plan analysis remains the fallback.
+- [x] Real PostgreSQL telemetry collector & sliding-window snapshots
+- [x] Privacy Gateway with structural AST tokenization
+- [x] GNN plan graph cost surrogate model
+- [x] Gymnasium RL optimization environment with DQN policy
+- [x] Safe SQL AST rewriter with semantic regression verification
+- [x] LangGraph conversational DBA assistant with 10 authorized tools
+- [x] Complete 11-view technical DBA frontend
+- [x] Enterprise security hardening (HMAC tokens, PBKDF2, RBAC, Audit Ledger)
+- [ ] Multi-database cluster federation (Aurora, Citus, TimescaleDB)
+- [ ] Automatic off-peak maintenance window migration scheduler
+- [ ] Cross-region read-replica telemetry correlation

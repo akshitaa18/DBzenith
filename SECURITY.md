@@ -1,82 +1,98 @@
-# DBZenith Security Policy v0.6
+# DBZenith Security Policy & Hardening Architecture
 
-## Mandatory privacy boundary
+## Security Invariants
 
-DBZenith treats the privacy gateway as a mandatory security boundary between raw PostgreSQL telemetry and any future AI/ML component.
+DBZenith enforces three non-negotiable operational invariants across all autonomous engines and user-facing APIs:
 
-Raw production information may be observed by the collector, but **AI-facing code may consume only `AIWorkloadRecord`**, whose query and plan fields are sanitized contracts.
+1. **RAW DATA NEVER ENTERS THE AI BOUNDARY**: AI models (GNN cost predictors, RL policy networks, LangGraph conversational agents) receive only `AIWorkloadRecord` contracts. Literals, client parameters, passwords, API tokens, connection strings, and PII are stripped; database identifiers are masked using deterministic SHA-256 tokens (`id_...`).
+2. **AI NEVER DIRECTLY MODIFIES PRODUCTION**: The advisory engines operate exclusively in read-only observation mode. Optimization experiments are executed within ephemeral, isolated sandbox containers using HypoPG virtual index constructs.
+3. **PRODUCTION CHANGES REQUIRE HUMAN APPROVAL**: Every optimization proposal requires explicit sign-off in the Human-in-the-Loop Approval Center by an authenticated operator with `DBA` or `ADMIN` roles.
 
-### Explicit contracts
+---
 
-- `RawQuery` — ingestion-only SQL containing the original query text.
-- `SanitizedQuery` — normalized, literal-free, structurally hashed SQL with schema/table/column identifiers replaced by deterministic tokens.
-- `RawPlan` — ingestion-only PostgreSQL `EXPLAIN (FORMAT JSON)` output.
-- `SanitizedPlan` — execution-plan structure with relation identifiers tokenized and expression-bearing fields sanitized.
-- `AIWorkloadRecord` — the only workload contract accepted by AI-facing code.
+## Authentication & Role-Based Access Control (RBAC)
 
-`RawQuery` and `RawPlan` must never be passed directly to AI modules.
+### Authentication Mechanism
+- **Token Format**: HMAC-SHA256 authenticated URL-safe tokens with embedded user IDs, roles, issued timestamps (`iat`), and expiration timestamps (`exp`).
+- **Signature Verification**: Verified in constant time via `hmac.compare_digest` to prevent timing attacks.
+- **Password Storage**: PBKDF2-HMAC-SHA256 with 200,000 iterations and per-user 16-byte cryptographically random hex salts.
 
-## Sanitization guarantees
+### Role Hierarchy
+- `VIEWER` (Weight 10): Read-only access to overview telemetry, slow queries, and workload summaries.
+- `ANALYST` (Weight 20): Execution plan analysis, GNN feature inspections, and safe SQL rewrite evaluations.
+- `DBA` (Weight 30): Sandbox simulation execution, recommendation approval, and migration sign-off.
+- `ADMIN` (Weight 40): Operator account creation, role assignment, and administrative audit inspection.
 
-The privacy gateway:
+```text
+[VIEWER]   --> /health, /queries, /workload
+[ANALYST]  --> /plans/analyze, /rewriter/rewrite
+[DBA]      --> /simulations, /recommendations/{id}/approve, /recommendations/{id}/reject
+[ADMIN]    --> /auth/users, full administrative control
+```
 
-1. Removes SQL line and block comments.
-2. Parses SQL into a structural AST of tokens and nested groups.
-3. Masks string literals, numbers, parameters, dollar-quoted values, and sensitive token classes.
-4. Detects and removes common email addresses, phone numbers, UUIDs, IPv4 addresses, API-key-like values, and password values.
-5. Tokenizes schema, table, column, alias, and other SQL identifiers using deterministic SHA-256-derived identifiers.
-6. Produces a structural hash from the sanitized representation, so changing literal values does not change the structural hash.
-7. Sanitizes execution-plan relation names and expression-bearing fields and fail-closes unknown plan text.
-8. Runs a policy check before an AI record can be constructed.
-9. Emits structured security audit events without logging raw SQL, raw plans, or payloads. Audit decisions are persisted in `privacy_audit_events` when the DB is available.
+---
 
-## AI boundary enforcement
+## Privacy Gateway Architecture
 
-`AIBoundaryValidator` accepts `AIWorkloadRecord` only. Passing `RawQuery`, `RawPlan`, dictionaries containing raw fields, or other types is rejected.
+The Privacy Gateway (`backend/app/services/privacy/gateway.py`) sits between raw PostgreSQL catalogs and downstream advisory modules:
 
-This is a runtime contract boundary; static type checking can complement it but is not treated as the security control by itself.
+```text
+Incoming SQL / Plan
+         │
+         ▼
+[Tokenizer / Lexer]   ──> Strips line (--) and block (/* */) comments
+         │
+         ▼
+[AST Parser]          ──> Identifies AST node boundaries and expression trees
+         │
+         ▼
+[Literal Masker]      ──> Replaces strings with <STR>, numbers with <NUM>
+         │
+         ▼
+[Identifier Hasher]   ──> Replaces table/column/alias names with id_<sha256>
+         │
+         ▼
+[Structural Hasher]   ──> Computes isomorphic plan signature
+         │
+         ▼
+[Policy Engine]       ──> Scans for leaked keys, passwords, bearer tokens, or IPs
+         │
+         ▼
+   AIWorkloadRecord   ──> Passed to GNN / RL / Assistant
+```
 
-## Sensitive data that must not reach AI
+### Scrubbed Data Types
+- Database passwords and connection URIs (`postgres://user:pass@host/db`)
+- Bearer tokens and API keys (`sk_...`, `pk_...`, `api_key_...`)
+- RSA/EC private keys (`-----BEGIN PRIVATE KEY-----`)
+- Email addresses, telephone patterns, and UUIDs
+- Raw client rows and execution plan output expressions
 
-- row values or customer information
-- passwords and database credentials
-- API keys and authentication tokens
-- email addresses and phone numbers
-- UUIDs and IP addresses when they occur as values
-- JSON/application payload values
-- SQL comments containing sensitive content
-- unsanitized SQL literals
-- raw execution-plan expressions containing values
+---
 
-## Production safety
+## Input Validation & Injection Defenses
 
-- Production credentials belong in environment/secret management, never source control.
-- `.env` is ignored by Git; `.env.example` contains placeholders only.
-- AI/LLM code must not execute arbitrary production SQL.
-- Optimization experiments happen in isolated PostgreSQL sandboxes.
-- Production-changing actions require explicit human approval.
-- GNN/RL/agent components are not implemented in v0.6.
+1. **SQL Injection Defense**:
+   - `_explain_sql` in `backend/app/api/v1/routes/plans.py` strictly permits single-statement read-only `SELECT`, `WITH`, and `VALUES` queries.
+   - Semicolons (`;`), statement stacking, and SQL comments (`--`, `/*`) are rejected before optimizer planning.
+2. **Sandbox Escape Defenses**:
+   - `SandboxSimulator._readonly_sql` enforces strict statement isolation and blocks all data-modifying keywords (`INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `TRUNCATE`, `GRANT`, `REVOKE`, `COPY`, `EXECUTE`).
+   - Sandbox databases operate on an isolated internal network without ingress access to the production database network.
+3. **Prompt Injection & Tool Abuse Defenses**:
+   - `AssistantSafetyPolicy` inspects incoming conversational prompts for instruction overrides (`ignore prior instructions`, `developer mode`, `dan mode`, `print system prompt`, `repeat words above`).
+   - `ToolAuthorizer` gates each of the 10 assistant tools against the user's role; non-DBA roles cannot trigger `request_migration_approval`.
 
-## Fail-closed behavior
+---
 
-If SQL parsing, plan sanitization, policy validation, or an AI-boundary check fails, DBZenith rejects the handoff rather than forwarding partially sanitized data.
+## Unified Audit Ledger
 
+All critical actions are logged to `security_audit_events` with IP address, user agent, actor role, target entity, and structured JSON metadata:
+- `AUTH`: Login successes and failed authentication attempts.
+- `RECOMMENDATION`: New optimization proposals and generation runs.
+- `SIMULATION`: Ephemeral HypoPG runs and benchmark measurements.
+- `APPROVAL` / `REJECTION`: Operator rationale and human sign-off records.
+- `MIGRATION`: Applied schema and index changes.
+- `AI_BOUNDARY`: Sanitization decisions and security rejection alerts.
+- `AGENT_ACTION`: Tool calls and conversational turns.
 
-## Execution-plan security boundary (v0.6)
-
-Execution plans can contain relation names, index names, predicates, output expressions, and other workload details. Every plan submitted to the analysis API crosses the existing Privacy Gateway before analysis results are persisted. Identifier-bearing fields are tokenized and expression fields are literal-masked. Unknown textual plan fields are dropped rather than forwarded.
-
-The SQL analysis path accepts only a single read-only `SELECT`, `WITH`, or `VALUES` statement and uses `EXPLAIN (FORMAT JSON)` without `ANALYZE`, so the submitted SQL is planned but not executed. A 5-second local statement timeout limits planning work.
-
-## Optimization Recommendations
-
-DBZenith v0.6 adds deterministic Index, Partition, Query Rewrite, and Join Strategy advisors. Recommendations are persisted, require explicit approval, and never execute production DDL. Approve/reject actions are audit logged. GNN/RL are not implemented.
-
-
-## v0.6 simulation boundary
-
-Optimization simulations execute only against the isolated sandbox PostgreSQL instance. HypoPG is installed in the sandbox only. Production tables are never modified by simulations. Sandbox DDL, benchmark indexes, and HypoPG state are cleaned after each run; timeouts, temp-file limits, row-copy caps, and benchmark limits constrain resource use.
-
-### Learned-model boundary
-
-The GNN consumes only sanitized plan graphs and numeric features. Training data is synthetic and reproducible. Model artifacts contain weights/normalization statistics only; production row values and raw SQL literals are not included.
+The ledger is accessible via `GET /api/v1/audit`.
