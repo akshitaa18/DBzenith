@@ -1,0 +1,1 @@
+"""DBZenith backend application."""
