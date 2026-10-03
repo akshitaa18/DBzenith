@@ -5,6 +5,10 @@ SQLAlchemy==2.0.40
 psycopg[binary]==3.2.6
 alembic==1.15.2
 python-json-logger==3.3.0
+sqlglot>=25.0.0
+gymnasium>=1.0.0
+numpy>=1.26.0
+langgraph>=0.2.0
 
 # CPU-only PyTorch: avoids downloading NVIDIA/CUDA runtime packages in Docker.
 --extra-index-url https://download.pytorch.org/whl/cpu
