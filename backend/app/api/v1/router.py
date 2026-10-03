@@ -10,7 +10,12 @@ from app.api.v1.routes.rl import router as rl_router
 from app.api.v1.routes.rewriter import router as rewriter_router
 from app.api.v1.routes.assistant import router as assistant_router
 
+from app.api.v1.routes.auth import router as auth_router
+from app.api.v1.routes.audit import router as audit_router
+
 api_router = APIRouter()
+api_router.include_router(auth_router)
+api_router.include_router(audit_router)
 api_router.include_router(health_router)
 api_router.include_router(queries_router)
 api_router.include_router(recommendations_router)

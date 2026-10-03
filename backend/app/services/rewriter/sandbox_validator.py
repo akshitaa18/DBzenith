@@ -52,6 +52,30 @@ class SandboxRewriteValidator:
         orig_sql = original_query.strip().rstrip(";")
         new_sql = rewritten_query.strip().rstrip(";")
 
+        # Block multi-statement queries or SQL injection separators
+        if ";" in orig_sql or ";" in new_sql:
+            return {
+                "validation_status": ValidationStatus.UNSAFE_REJECTED.value,
+                "baseline_cost": None,
+                "rewritten_cost": None,
+                "cost_improvement_pct": None,
+                "semantic_match": False,
+                "rejection_reason": "Multi-statement SQL detected; sandbox escape attempt rejected.",
+            }
+
+        # Enforce read-only SELECT or WITH statements
+        for q in (orig_sql, new_sql):
+            first_kw = q.split(None, 1)[0].upper() if q else ""
+            if first_kw not in {"SELECT", "WITH", "VALUES"}:
+                return {
+                    "validation_status": ValidationStatus.UNSAFE_REJECTED.value,
+                    "baseline_cost": None,
+                    "rewritten_cost": None,
+                    "cost_improvement_pct": None,
+                    "semantic_match": False,
+                    "rejection_reason": f"Only read-only SELECT or WITH statements permitted (found {first_kw}).",
+                }
+
         try:
             with engine.connect() as conn:
                 # 1. Cost analysis via EXPLAIN (FORMAT JSON)

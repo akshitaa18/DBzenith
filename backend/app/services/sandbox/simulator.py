@@ -326,9 +326,13 @@ class SandboxSimulator:
     @staticmethod
     def _readonly_sql(sql: str) -> str:
         stripped = sql.strip().rstrip(";")
+        if ";" in stripped:
+            raise ValueError("multi-statement queries are strictly prohibited in the sandbox")
+        if "--" in stripped or "/*" in stripped:
+            raise ValueError("SQL comments are not permitted in simulation queries")
         if not re.match(r"^(SELECT|WITH|VALUES)\b", stripped, re.I):
             raise ValueError("only SELECT/WITH/VALUES statements may be simulated")
-        if re.search(r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|GRANT|REVOKE|COPY)\b", stripped, re.I):
+        if re.search(r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|GRANT|REVOKE|COPY|EXECUTE)\b", stripped, re.I):
             raise ValueError("non-read-only SQL is not permitted in the sandbox")
         return stripped
 

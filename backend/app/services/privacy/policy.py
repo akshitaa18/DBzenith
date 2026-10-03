@@ -10,8 +10,12 @@ from app.services.privacy.contracts import AIWorkloadRecord, SanitizedPlan, Sani
 _SECRET_PATTERNS = [
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"),
-    re.compile(r"\b(?:sk|pk|api[_-]?key|token|secret)[_-]?[A-Za-z0-9_-]{12,}\b", re.I),
+    re.compile(r"\b(?:sk|pk|api[_-]?key|token|secret|access_token|refresh_token)[_-]?[A-Za-z0-9_-]{12,}\b", re.I),
     re.compile(r"\bpassword\s*[:=]\s*\S+", re.I),
+    re.compile(r"\bpostgres(?:ql)?://[^\s\"']+", re.I),
+    re.compile(r"\b(?:bearer\s+[A-Za-z0-9._\-]{20,})\b", re.I),
+    re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", re.I),
+    re.compile(r"\b(?:client_secret|db_password|master_key)\s*[:=]\s*\S+", re.I),
 ]
 
 

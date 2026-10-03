@@ -70,10 +70,31 @@ def chat_with_assistant(
     # Fetch audit events for this session
     session_audit = audit.get_session_audit_trail(session_id)
 
+    # Security ledger entry
+    from app.services.audit.recorder import AuditEventCategory, record_audit_event
+    safety_passed = final_state.get("safety_check_passed", True)
+    record_audit_event(
+        db=db,
+        event_category=AuditEventCategory.AI_BOUNDARY if not safety_passed else AuditEventCategory.AGENT_ACTION,
+        action="agent_chat_turn" if safety_passed else "agent_safety_violation",
+        actor_id=session_id,
+        actor_username="conversational_dba_user",
+        actor_role=request.role,
+        target_entity="LangGraphAssistant",
+        target_id=session_id,
+        status="SUCCESS" if safety_passed else "SECURITY_VIOLATION",
+        details={
+            "safety_passed": safety_passed,
+            "violation_reason": final_state.get("safety_violation_reason"),
+            "intent": final_state.get("parsed_intent"),
+            "tools_called": [e.get("tool_name") for e in session_audit if e.get("tool_name")],
+        },
+    )
+
     return AssistantChatResponse(
         session_id=session_id,
         response=reply,
-        safety_check_passed=final_state.get("safety_check_passed", True),
+        safety_check_passed=safety_passed,
         safety_violation_reason=final_state.get("safety_violation_reason"),
         evidence=final_state.get("evidence", {}),
         analysis=final_state.get("analysis", {}),

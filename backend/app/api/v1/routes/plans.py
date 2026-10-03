@@ -22,6 +22,9 @@ def _explain_sql(db: Session, sql: str) -> Any:
     stripped = sql.strip()
     if ";" in stripped:
         raise HTTPException(status_code=400, detail="multi_statement_sql_not_allowed")
+    # Block SQL comment injection tricks designed to mask DDL/DML
+    if "--" in stripped or "/*" in stripped:
+        raise HTTPException(status_code=400, detail="sql_comments_not_allowed")
     first = stripped.split(None, 1)[0].upper() if stripped else ""
     if first not in {"SELECT", "WITH", "VALUES"}:
         raise HTTPException(status_code=400, detail="only_read_only_sql_is_supported")

@@ -21,6 +21,7 @@ class ControlledToolName(str, Enum):
 
 
 class UserRole(str, Enum):
+    ADMIN = "admin"
     DBA = "dba"
     ANALYST = "analyst"
     VIEWER = "viewer"

@@ -64,28 +64,89 @@ def get_recommendation(recommendation_id: int, db: Session = Depends(get_db)) ->
 
 
 
-def _decide(db: Session, recommendation_id: int, new_status: str, reason: str) -> RecommendationResponse:
+from fastapi import Request
+from app.core.auth import get_current_user_optional, require_dba_or_admin
+from app.core.security import Role, TokenPayload
+from app.services.audit.recorder import AuditEventCategory, record_audit_event
+
+
+def _decide(
+    db: Session,
+    recommendation_id: int,
+    new_status: str,
+    reason: str,
+    request: Request | None = None,
+    current_user: TokenPayload | None = None,
+) -> RecommendationResponse:
     row = db.get(OptimizationRecommendation, recommendation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="recommendation_not_found")
     if row.status != "pending":
         raise HTTPException(status_code=409, detail=f"recommendation_already_{row.status}")
+
+    # Enforce RBAC: If a user token is provided, verify it is DBA or ADMIN.
+    if current_user and current_user.role not in {Role.DBA, Role.ADMIN}:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only DBA or ADMIN roles can approve or reject recommendations (current: {current_user.role.value}).",
+        )
+
     previous = row.status
     row.status = new_status
+
+    # Legacy event
     db.add(RecommendationAuditEvent(
         recommendation_id=row.id, action=new_status, previous_status=previous,
         new_status=new_status, reason=reason,
         metadata_json=json.dumps({"requires_approval": row.requires_approval}),
     ))
-    db.commit(); db.refresh(row)
+    db.commit()
+    db.refresh(row)
+
+    # Security Audit event
+    ip = request.client.host if request and request.client else None
+    ua = request.headers.get("user-agent") if request else None
+    record_audit_event(
+        db=db,
+        event_category=AuditEventCategory.APPROVAL if new_status == "approved" else AuditEventCategory.REJECTION,
+        action=f"recommendation_{new_status}",
+        actor_id=current_user.user_id if current_user else "system",
+        actor_username=current_user.username if current_user else "dba_operator",
+        actor_role=current_user.role.value if current_user else "DBA",
+        target_entity="OptimizationRecommendation",
+        target_id=str(row.id),
+        status="SUCCESS",
+        ip_address=ip,
+        user_agent=ua,
+        details={
+            "proposed_change": row.proposed_change,
+            "target": row.target,
+            "reason": reason,
+            "previous_status": previous,
+        },
+    )
+
     return _response(row)
 
 
 @router.post("/{recommendation_id}/approve", response_model=RecommendationResponse)
-def approve(recommendation_id: int, request: RecommendationDecisionRequest, db: Session = Depends(get_db)) -> RecommendationResponse:
-    return _decide(db, recommendation_id, "approved", request.reason)
+def approve(
+    recommendation_id: int,
+    request_data: RecommendationDecisionRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+    current_user: TokenPayload | None = Depends(get_current_user_optional),
+) -> RecommendationResponse:
+    return _decide(db, recommendation_id, "approved", request_data.reason, req, current_user)
 
 
 @router.post("/{recommendation_id}/reject", response_model=RecommendationResponse)
-def reject(recommendation_id: int, request: RecommendationDecisionRequest, db: Session = Depends(get_db)) -> RecommendationResponse:
-    return _decide(db, recommendation_id, "rejected", request.reason)
+def reject(
+    recommendation_id: int,
+    request_data: RecommendationDecisionRequest,
+    req: Request,
+    db: Session = Depends(get_db),
+    current_user: TokenPayload | None = Depends(get_current_user_optional),
+) -> RecommendationResponse:
+    return _decide(db, recommendation_id, "rejected", request_data.reason, req, current_user)
+

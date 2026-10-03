@@ -25,6 +25,10 @@ _PROMPT_INJECTION_PATTERNS = [
     r"(?i)\bnew\s+system\s+prompt\b",
     r"(?i)\bbypass\s+(all\s+)?(guards?|filters?|privacy|security|gateway)\b",
     r"(?i)\bpretend\s+you\s+(are\s+not|have\s+no)\s+(an\s+ai|rules|restrictions)\b",
+    r"(?i)\bprint\s+(your\s+)?(system\s+prompt|initial\s+instructions)\b",
+    r"(?i)\brepeat\s+(all\s+words\s+above|the\s+text\s+above)\b",
+    r"(?i)\boverride\s+(system|guardrails|safety)\b",
+    r"(?i)\bact\s+as\s+(an\s+unrestricted|root|sudo)\b",
 ]
 
 # Raw SQL execution patterns
@@ -96,7 +100,8 @@ class ToolAuthorizer:
 
     # Role permissions mapping
     _ROLE_PERMISSIONS: dict[UserRole, set[ControlledToolName]] = {
-        UserRole.DBA: set(ControlledToolName),  # Full access to controlled tools
+        UserRole.ADMIN: set(ControlledToolName),  # Full access to controlled tools
+        UserRole.DBA: set(ControlledToolName),    # Full access to controlled tools
         UserRole.ANALYST: {
             ControlledToolName.GET_SLOW_QUERIES,
             ControlledToolName.GET_QUERY_DETAILS,
