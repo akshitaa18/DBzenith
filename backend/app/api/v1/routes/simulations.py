@@ -28,6 +28,12 @@ def create_simulation(request: SimulationRequest, db: Session = Depends(get_db))
     return _response(row)
 
 
+@router.get("", response_model=list[SimulationResponse])
+def list_simulations(limit: int = 50, db: Session = Depends(get_db)) -> list[SimulationResponse]:
+    rows = db.query(OptimizationSimulation).order_by(OptimizationSimulation.id.desc()).limit(limit).all()
+    return [_response(r) for r in rows]
+
+
 @router.get("/{simulation_id}", response_model=SimulationResponse)
 def get_simulation(simulation_id: int, db: Session = Depends(get_db)) -> SimulationResponse:
     row = db.get(OptimizationSimulation, simulation_id)

@@ -69,3 +69,42 @@ th { color: #475467; font-weight: 600; }
 .simulation-metrics span { padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: white; font-size: 12px; color: #667085; }
 .simulation-metrics strong { display: block; margin-top: 4px; color: #172033; font-size: 16px; }
 @media (max-width: 780px) { .simulation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* DBA Distinct Categories Badges */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.badge-observed { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.badge-ai-analysis { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+.badge-recommendation { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-simulation { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
+.badge-approval-required { background: #ffe4e6; color: #be123c; border: 1px solid #fecdd3; }
+
+/* Severity Indicators */
+.sev-high { background: #fee2e2; color: #b91c1c; border-left: 4px solid #ef4444; }
+.sev-med { background: #fef3c7; color: #b45309; border-left: 4px solid #f59e0b; }
+.sev-low { background: #ecfdf5; color: #047857; border-left: 4px solid #10b981; }
+
+/* Filter & Search Bar */
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.filter-input, .filter-select { padding: 8px 12px; border: 1px solid #d0d5dd; border-radius: 8px; font-size: 13px; background: #fff; }
+.filter-input { min-width: 220px; }
+
+/* Pagination Controls */
+.pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; font-size: 13px; color: #475467; }
+.pagination-buttons { display: flex; gap: 8px; }
+
+/* Navigation Tabs */
+.subnav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 24px; border-bottom: 1px solid #eaecf0; }
+.subnav-link { padding: 8px 14px; border-radius: 8px; text-decoration: none; color: #475467; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.subnav-link:hover { background: #f2f4f7; color: #101828; }
+.subnav-link.active { background: #101828; color: #ffffff; }
+
+/* Empty & Loading States */
+.empty-state { text-align: center; padding: 48px 16px; color: #667085; }
+.empty-state h3 { margin: 0 0 6px; color: #344054; }
+.loading-box { text-align: center; padding: 32px; color: #667085; font-style: italic; }
+
+/* Code and diff blocks */
+.sql-box { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 8px; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; }
+.comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+@media (max-width: 768px) { .comparison-grid { grid-template-columns: 1fr; } }
+

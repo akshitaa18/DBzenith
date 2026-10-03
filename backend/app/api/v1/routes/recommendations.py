@@ -36,12 +36,32 @@ def list_recommendations(
     return RecommendationPage(items=[_response(r) for r in rows], page=page, page_size=page_size, total=total)
 
 
+@router.get("/audit/events")
+def list_recommendation_audit_events(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Lists audit events for recommendation decisions (approvals, rejections)."""
+    events = db.query(RecommendationAuditEvent).order_by(RecommendationAuditEvent.created_at.desc()).limit(50).all()
+    return [
+        {
+            "id": e.id,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "recommendation_id": e.recommendation_id,
+            "action": e.action,
+            "previous_status": e.previous_status,
+            "new_status": e.new_status,
+            "reason": e.reason,
+            "metadata": json.loads(e.metadata_json) if e.metadata_json else {},
+        }
+        for e in events
+    ]
+
+
 @router.get("/{recommendation_id}", response_model=RecommendationResponse)
 def get_recommendation(recommendation_id: int, db: Session = Depends(get_db)) -> RecommendationResponse:
     row = db.get(OptimizationRecommendation, recommendation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="recommendation_not_found")
     return _response(row)
+
 
 
 def _decide(db: Session, recommendation_id: int, new_status: str, reason: str) -> RecommendationResponse:

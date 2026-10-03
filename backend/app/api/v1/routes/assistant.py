@@ -111,3 +111,11 @@ def list_controlled_tools() -> list[dict[str, str]]:
         {"name": ControlledToolName.REQUEST_MIGRATION_APPROVAL.value, "description": "Creates human DBA review request (strictly non-self-approving)."},
     ]
     return tool_docs
+
+
+@router.get("/audit/all")
+def get_all_audit_logs() -> list[dict[str, Any]]:
+    """Retrieves all assistant tool execution and prompt defense audit events."""
+    audit = get_assistant_audit_logger()
+    return audit.all_audit_records()
+

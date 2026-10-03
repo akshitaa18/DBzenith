@@ -181,6 +181,10 @@ export async function createSimulation(recommendationId: number, benchmarkRuns =
   return response.json()
 }
 
+export function listSimulations(limit = 50): Promise<Simulation[]> {
+  return request(`/api/v1/simulations?limit=${limit}`)
+}
+
 export function getSimulation(id: number): Promise<Simulation> {
   return request(`/api/v1/simulations/${id}`)
 }
@@ -229,4 +233,65 @@ export async function sendAssistantMessage(
 export function getAssistantTools(): Promise<Array<{ name: string; description: string }>> {
   return request('/api/v1/assistant/tools')
 }
+
+export function getReadiness(): Promise<{ status: string; database: string }> {
+  return request('/api/v1/ready')
+}
+
+export function getWorkloadSnapshots(limit = 10): Promise<Array<Record<string, unknown>>> {
+  return request(`/api/v1/workload/snapshots?limit=${limit}`)
+}
+
+export function getAssistantAuditLogs(): Promise<Array<{
+  timestamp: string
+  session_id: string
+  event_type: string
+  tool_name?: string
+  input_payload?: Record<string, unknown>
+  output_summary?: string
+  authorized: boolean
+  security_flag?: string | null
+}>> {
+  return request('/api/v1/assistant/audit/all')
+}
+
+export type RecommendationAuditEvent = {
+  id: number
+  created_at: string | null
+  recommendation_id: number
+  action: string
+  previous_status: string | null
+  new_status: string
+  reason: string
+  metadata: Record<string, unknown>
+}
+
+export function getRecommendationAuditEvents(): Promise<RecommendationAuditEvent[]> {
+  return request('/api/v1/recommendations/audit/events')
+}
+
+export type SQLRewriteResponse = {
+  original_query: string
+  rewritten_query: string
+  transformation: string
+  reason: string
+  expected_benefit: string
+  confidence: number
+  validation_status: string
+  safety_verdict: string
+  cost_improvement_pct: number | null
+  semantic_match: boolean | null
+  production_modified: boolean
+}
+
+export async function rewriteSql(sql: string, validateSandbox = true): Promise<SQLRewriteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/rewriter/rewrite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, validate_sandbox: validateSandbox }),
+  })
+  if (!response.ok) throw new Error(`SQL rewrite failed: ${response.status}`)
+  return response.json()
+}
+
 

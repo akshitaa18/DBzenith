@@ -1,0 +1,164 @@
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { getQueryDetail, type QueryDetail } from '../lib/api'
+
+function formatMs(value: number) {
+  return `${value.toFixed(2)} ms`
+}
+
+export function QueryDetails() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialQueryId = searchParams.get('id') || '1'
+  const [queryIdInput, setQueryIdInput] = useState(initialQueryId)
+  const [detail, setDetail] = useState<QueryDetail | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const loadQuery = (id: number) => {
+    setLoading(true)
+    setError(null)
+    getQueryDetail(id)
+      .then((data) => {
+        setDetail(data)
+      })
+      .catch((err) => {
+        setError(err.message || `Query ID ${id} not found in telemetry store.`)
+        setDetail(null)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    const idNum = Number(searchParams.get('id'))
+    if (idNum) {
+      setQueryIdInput(String(idNum))
+      loadQuery(idNum)
+    } else {
+      loadQuery(Number(initialQueryId))
+    }
+  }, [searchParams])
+
+  const handleLookup = (e: React.FormEvent) => {
+    e.preventDefault()
+    const num = Number(queryIdInput.trim())
+    if (num) {
+      setSearchParams({ id: String(num) })
+    }
+  }
+
+  const copySql = () => {
+    if (detail?.normalized_query) {
+      navigator.clipboard.writeText(detail.normalized_query)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const hitRatio = detail
+    ? detail.shared_blks_hit + detail.shared_blks_read > 0
+      ? (detail.shared_blks_hit / (detail.shared_blks_hit + detail.shared_blks_read)) * 100
+      : 100
+    : 0
+
+  return (
+    <section>
+      <div className="section-head" style={{ marginBottom: '18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+          <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
+          <span className="badge badge-observed">Telemetry Inspector</span>
+        </div>
+        <h1 style={{ fontSize: '2.2rem', margin: 0 }}>Query Performance Details</h1>
+        <p className="subtitle" style={{ fontSize: '0.95rem', color: '#64748b' }}>
+          Detailed telemetry, memory buffer hit ratios, and I/O distribution for a specific normalized query.
+        </p>
+      </div>
+
+      <form onSubmit={handleLookup} className="card filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <label style={{ fontSize: '12px', fontWeight: 600 }}>Query ID:</label>
+        <input
+          type="number"
+          className="filter-input"
+          style={{ width: '160px' }}
+          value={queryIdInput}
+          onChange={(e) => setQueryIdInput(e.target.value)}
+          placeholder="e.g. 101"
+        />
+        <button type="submit" className="primary-button" style={{ padding: '8px 16px' }} disabled={loading}>
+          {loading ? 'Inspecting...' : 'Inspect Query'}
+        </button>
+      </form>
+
+      {error && <div className="alert">{error}</div>}
+
+      {detail && (
+        <>
+          <div className="grid metrics" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '14px', marginBottom: '20px' }}>
+            <article className="card">
+              <span className="badge badge-observed">OBSERVED</span>
+              <h2 style={{ marginTop: '8px' }}>Mean Latency</h2>
+              <strong style={{ fontSize: '24px', color: detail.mean_exec_time_ms > 100 ? '#b91c1c' : '#166534' }}>
+                {formatMs(detail.mean_exec_time_ms)}
+              </strong>
+              <p>Min: {formatMs(detail.min_exec_time_ms)} | Max: {formatMs(detail.max_exec_time_ms)}</p>
+            </article>
+
+            <article className="card">
+              <span className="badge badge-observed">OBSERVED</span>
+              <h2 style={{ marginTop: '8px' }}>Execution Calls</h2>
+              <strong style={{ fontSize: '24px' }}>{detail.calls.toLocaleString()}</strong>
+              <p>Frequency: {detail.query_frequency_per_minute.toFixed(1)} calls/min</p>
+            </article>
+
+            <article className="card">
+              <span className="badge badge-observed">OBSERVED</span>
+              <h2 style={{ marginTop: '8px' }}>Buffer Cache Hit</h2>
+              <strong style={{ fontSize: '24px', color: hitRatio >= 95 ? '#166534' : '#b45309' }}>
+                {hitRatio.toFixed(1)}%
+              </strong>
+              <p>Hits: {detail.shared_blks_hit.toLocaleString()} | Reads: {detail.shared_blks_read.toLocaleString()}</p>
+            </article>
+
+            <article className="card">
+              <span className="badge badge-observed">OBSERVED</span>
+              <h2 style={{ marginTop: '8px' }}>Temp Disk Activity</h2>
+              <strong style={{ fontSize: '24px', color: detail.temp_blks_written > 0 ? '#b91c1c' : '#475467' }}>
+                {detail.temp_blks_written.toLocaleString()} blks
+              </strong>
+              <p>WorkMem overflow spill indicator</p>
+            </article>
+          </div>
+
+          <article className="card section-card">
+            <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Normalized Query Statement (Privacy Preserved)</h2>
+                <span className="muted">Parameterized query template; client literals and secrets are scrubbed</span>
+              </div>
+              <button className="btn-secondary" onClick={copySql} style={{ fontSize: '12px', padding: '6px 12px' }}>
+                {copied ? '✓ Copied!' : 'Copy SQL'}
+              </button>
+            </div>
+
+            <pre className="sql-box">{detail.normalized_query}</pre>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+              <Link to={`/plans?queryId=${detail.query_id}`} className="primary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
+                View EXPLAIN Execution Plan →
+              </Link>
+              <Link to={`/gnn?queryId=${detail.query_id}`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
+                Run GNN Bottleneck Analysis →
+              </Link>
+              <Link to={`/recommendations?queryId=${detail.query_id}`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
+                Find Recommendations →
+              </Link>
+              <Link to={`/assistant`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
+                Ask DBA Assistant →
+              </Link>
+            </div>
+          </article>
+        </>
+      )}
+    </section>
+  )
+}
