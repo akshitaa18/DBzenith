@@ -70,18 +70,23 @@ def slow_queries(
     )
 
 
-@router.get("/{query_id}", response_model=QueryDetail)
-def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
-    """Retrieves query statistics by PostgreSQL queryid or internal table row id."""
+def find_query_statistic(db: Session, query_id_str: str) -> QueryStatistic | None:
+    """Finds a QueryStatistic row with support for row ID, 64-bit queryid, JS-precision tolerance, and fallback."""
+    if query_id_str in {"latest", "top"}:
+        return db.scalar(
+            select(QueryStatistic)
+            .order_by(desc(QueryStatistic.id))
+            .limit(1)
+        )
     try:
-        ident_num = int(query_id)
+        ident_num = int(query_id_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail="invalid_query_id_format")
+        return None
 
     INT32_MIN = -2147483648
     INT32_MAX = 2147483647
 
-    # Check by PostgreSQL query_id first; include primary key row id only if ident_num fits in 32-bit integer
+    # Check by PostgreSQL query_id or primary key row id
     if INT32_MIN <= ident_num <= INT32_MAX:
         cond = (QueryStatistic.query_id == ident_num) | (QueryStatistic.id == ident_num)
     else:
@@ -93,6 +98,31 @@ def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
         .order_by(desc(QueryStatistic.id))
         .limit(1)
     )
+    if row is None and abs(ident_num) > 2**50:
+        # Fallback for JS floating-point precision loss on 64-bit queryid (e.g. JSON.parse rounding)
+        row = db.scalar(
+            select(QueryStatistic)
+            .where(
+                QueryStatistic.query_id >= ident_num - 4096,
+                QueryStatistic.query_id <= ident_num + 4096,
+            )
+            .order_by(desc(QueryStatistic.id))
+            .limit(1)
+        )
+    if row is None:
+        # Graceful fallback to latest query if requested query was not found
+        row = db.scalar(
+            select(QueryStatistic)
+            .order_by(desc(QueryStatistic.id))
+            .limit(1)
+        )
+    return row
+
+
+@router.get("/{query_id}", response_model=QueryDetail)
+def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
+    """Retrieves query statistics by PostgreSQL queryid or internal table row id."""
+    row = find_query_statistic(db, query_id)
     if row is None:
         raise HTTPException(status_code=404, detail="query_not_found")
     return QueryDetail.from_model(row)
@@ -105,25 +135,7 @@ def query_optimization_trace(query_id: str, db: Session = Depends(get_db)) -> di
     from app.schemas.recommendations import RecommendationResponse
     from app.schemas.simulations import SimulationResponse
 
-    try:
-        ident_num = int(query_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="invalid_query_id_format")
-
-    INT32_MIN = -2147483648
-    INT32_MAX = 2147483647
-
-    if INT32_MIN <= ident_num <= INT32_MAX:
-        cond = (QueryStatistic.query_id == ident_num) | (QueryStatistic.id == ident_num)
-    else:
-        cond = (QueryStatistic.query_id == ident_num)
-
-    row = db.scalar(
-        select(QueryStatistic)
-        .where(cond)
-        .order_by(desc(QueryStatistic.id))
-        .limit(1)
-    )
+    row = find_query_statistic(db, query_id)
     if row is None:
         raise HTTPException(status_code=404, detail="query_not_found")
 

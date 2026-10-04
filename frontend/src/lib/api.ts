@@ -79,6 +79,7 @@ export type WorkloadSummary = {
   unique_queries: number
   slow_queries: number
   top_queries: Array<{
+    id?: number
     query_id: number
     mean_exec_time_ms: number
     total_exec_time_ms: number

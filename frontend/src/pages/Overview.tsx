@@ -309,7 +309,7 @@ export function Overview() {
                     <td className="query-cell">{q.query}</td>
                     <td>
                       <Link
-                        to={`/queries?id=${q.query_id}`}
+                        to={`/queries?id=${q.id || q.query_id}`}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',

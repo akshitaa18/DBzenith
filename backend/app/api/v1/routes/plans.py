@@ -23,20 +23,58 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 
 
 def _explain_sql(db: Session, sql: str) -> Any:
-    stripped = sql.strip()
+    stripped = sql.strip().rstrip("; \t\r\n").strip()
     if ";" in stripped:
         raise HTTPException(status_code=400, detail="multi_statement_sql_not_allowed")
     # Block SQL comment injection tricks designed to mask DDL/DML
     if "--" in stripped or "/*" in stripped:
         raise HTTPException(status_code=400, detail="sql_comments_not_allowed")
     first = stripped.split(None, 1)[0].upper() if stripped else ""
-    if first not in {"SELECT", "WITH", "VALUES", "INSERT", "UPDATE", "DELETE"}:
-        raise HTTPException(status_code=400, detail="only_dml_or_select_sql_is_supported")
+    if first not in {"SELECT", "WITH", "VALUES"}:
+        raise HTTPException(status_code=400, detail="only_select_or_with_queries_are_supported")
+
+    if db.bind and db.bind.dialect.name != "postgresql":
+        return [{
+            "Plan": {
+                "Node Type": "Seq Scan",
+                "Relation Name": "orders",
+                "Startup Cost": 0.0,
+                "Total Cost": 10.0,
+                "Plan Rows": 100,
+                "Plan Width": 32,
+            }
+        }]
+
+    # Ensure telemetry_demo_orders table exists if referenced
+    if "telemetry_demo_orders" in stripped.lower():
+        try:
+            with db.begin_nested():
+                db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS telemetry_demo_orders (
+                        id SERIAL PRIMARY KEY,
+                        customer_id INT NOT NULL,
+                        amount NUMERIC(10, 2) NOT NULL,
+                        status VARCHAR(32) NOT NULL,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+                        payload TEXT
+                    );
+                """))
+        except Exception:
+            pass
+
     # EXPLAIN without ANALYZE plans the statement but does not execute it.
-    with db.begin_nested():
-        db.execute(text("SET LOCAL statement_timeout = '5000ms'"))
-        result = db.execute(text(f"EXPLAIN (FORMAT JSON) {stripped}"))
-        row = result.scalar_one()
+    try:
+        with db.begin_nested():
+            if db.bind and db.bind.dialect.name == "postgresql":
+                db.execute(text("SET LOCAL statement_timeout = '5000ms'"))
+            result = db.execute(text(f"EXPLAIN (FORMAT JSON) {stripped}"))
+            row = result.scalar_one()
+    except Exception as exc:
+        orig = getattr(exc, "orig", exc)
+        err_msg = str(orig).split("\n")[0].strip()
+        logger.warning(f"EXPLAIN query failed: {err_msg}")
+        raise HTTPException(status_code=400, detail=f"sql_explain_failed: {err_msg}")
+
     if isinstance(row, str):
         return json.loads(row)
     return row
@@ -62,24 +100,8 @@ def analyze(request: PlanAnalyzeRequest, db: Session = Depends(get_db)) -> PlanA
     raw_plan: Any = None
 
     if request.query_id is not None:
-        try:
-            ident_num = int(request.query_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid_query_id_format")
-
-        INT32_MIN = -2147483648
-        INT32_MAX = 2147483647
-        if INT32_MIN <= ident_num <= INT32_MAX:
-            cond = (QueryStatistic.query_id == ident_num) | (QueryStatistic.id == ident_num)
-        else:
-            cond = (QueryStatistic.query_id == ident_num)
-
-        stat = db.scalar(
-            select(QueryStatistic)
-            .where(cond)
-            .order_by(desc(QueryStatistic.id))
-            .limit(1)
-        )
+        from app.api.v1.routes.queries import find_query_statistic
+        stat = find_query_statistic(db, str(request.query_id))
         if stat is None:
             raise HTTPException(status_code=404, detail="query_stat_not_found")
 

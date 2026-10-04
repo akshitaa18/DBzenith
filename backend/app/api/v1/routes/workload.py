@@ -37,6 +37,7 @@ def workload_summary(db: Session = Depends(get_db)) -> WorkloadSummary:
         unique_queries=snapshot.unique_queries,
         slow_queries=snapshot.slow_queries,
         top_queries=[{
+            "id": q.id,
             "query_id": q.query_id,
             "mean_exec_time_ms": q.mean_exec_time_ms,
             "total_exec_time_ms": q.total_exec_time_ms,

@@ -12,7 +12,7 @@ FROM telemetry_demo_orders
 WHERE status = 'pending'
 GROUP BY customer_id
 ORDER BY total_val DESC
-LIMIT 50;`,
+LIMIT 50`,
   },
   {
     name: 'Status filter on demo orders',
@@ -20,7 +20,7 @@ LIMIT 50;`,
 FROM telemetry_demo_orders
 WHERE status = 'completed'
 ORDER BY created_at DESC
-LIMIT 100;`,
+LIMIT 100`,
   },
   {
     name: 'Self-join scan (high cost)',
@@ -29,7 +29,7 @@ FROM telemetry_demo_orders a
 JOIN telemetry_demo_orders b ON b.customer_id = a.customer_id
 WHERE a.amount > 700.00
 GROUP BY a.customer_id
-LIMIT 20;`,
+LIMIT 20`,
   },
 ]
 
@@ -62,7 +62,7 @@ export function GnnAnalysisPage() {
       getQueryDetail(qid.trim())
         .then((q) => {
           if (q.normalized_query) {
-            setSql(q.normalized_query)
+            setSql(q.normalized_query.replace(/;\s*$/, ''))
           }
         })
         .catch(() => {})
@@ -80,8 +80,9 @@ export function GnnAnalysisPage() {
   }, [searchParams])
 
   const handleRunAnalysis = async (queryToRun?: string) => {
-    const targetSql = queryToRun ?? sql
-    if (!targetSql.trim()) return
+    const rawSql = queryToRun ?? sql
+    if (!rawSql.trim()) return
+    const targetSql = rawSql.trim().replace(/;\s*$/, '')
     setLoading(true)
     setError(null)
     try {

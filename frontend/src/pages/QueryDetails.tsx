@@ -65,6 +65,7 @@ export function QueryDetails() {
     ])
       .then(([qData, tData]) => {
         setDetail(qData)
+        setQueryIdInput(String(qData.id || qData.query_id))
         setTraceData(tData)
         if (tData?.plan_analysis) {
           setGnnAnalysis(tData.plan_analysis)
@@ -90,19 +91,22 @@ export function QueryDetails() {
       return
     }
 
-    // Default to first slow query if no id is specified in URL
+    // Default to first query or latest query if no id is specified in URL
     setLoading(true)
-    getSlowQueries(1, 1)
+    getSlowQueries(1, 1, 0)
       .then((data) => {
         if (data.items && data.items.length > 0) {
           const top = data.items[0]
-          const chosenId = String(top.query_id || top.id)
+          const chosenId = String(top.id || top.query_id)
           setQueryIdInput(chosenId)
           loadQuery(chosenId)
+        } else {
+          loadQuery('latest')
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      .catch(() => {
+        loadQuery('latest')
+      })
   }, [searchParams])
 
   const handleLookup = (e: React.FormEvent) => {
@@ -116,7 +120,7 @@ export function QueryDetails() {
 
   const handleRefresh = () => {
     if (detail) {
-      loadQuery(detail.query_id, true)
+      loadQuery(detail.id || detail.query_id, true)
     }
   }
 
@@ -125,7 +129,7 @@ export function QueryDetails() {
     setAnalyzingGnn(true)
     setGnnError(null)
     try {
-      const res = await analyzePlan({ query_id: detail.query_id })
+      const res = await analyzePlan({ query_id: detail.id || detail.query_id })
       setGnnAnalysis(res)
     } catch (err: any) {
       setGnnError(err.message || 'GNN analysis failed. Please verify database connectivity.')
@@ -728,6 +732,26 @@ export function QueryDetails() {
             initialExpanded={true}
           />
         </>
+      )}
+
+      {!detail && !loading && (
+        <article className="card section-card" style={{ marginTop: '20px', textAlign: 'center', padding: '40px 20px' }}>
+          <h3 style={{ fontSize: '18px', color: '#f1f5f9', marginBottom: '8px' }}>No Query Telemetry Selected</h3>
+          <p style={{ color: '#94a3b8', fontSize: '14px', maxWidth: '520px', margin: '0 auto 20px' }}>
+            No query statistics are currently selected or found. You can browse recorded slow queries, inspect execution plans, or generate new database traffic.
+          </p>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <Link to="/slow-queries" className="btn btn-secondary" style={{ textDecoration: 'none', padding: '8px 16px' }}>
+              Browse Slow Queries
+            </Link>
+            <Link to="/plans" className="btn btn-secondary" style={{ textDecoration: 'none', padding: '8px 16px' }}>
+              Execution Plan Viewer
+            </Link>
+            <Link to="/" className="btn btn-primary" style={{ textDecoration: 'none', padding: '8px 16px' }}>
+              Overview Dashboard
+            </Link>
+          </div>
+        </article>
       )}
     </section>
   )

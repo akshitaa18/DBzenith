@@ -281,10 +281,10 @@ export function SlowQueries() {
                               {isTraceOpen ? 'Hide Trace ▲' : '⚡ Analyze Optimization'}
                             </button>
                             <div style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
-                              <Link to={`/queries?id=${q.query_id}`} style={{ color: '#64748b', textDecoration: 'none' }}>
+                              <Link to={`/queries?id=${q.id || q.query_id}`} style={{ color: '#64748b', textDecoration: 'none' }}>
                                 Inspect
                               </Link>
-                              <Link to={`/plans?queryId=${q.query_id}`} style={{ color: '#7c3aed', textDecoration: 'none' }}>
+                              <Link to={`/plans?queryId=${q.id || q.query_id}`} style={{ color: '#7c3aed', textDecoration: 'none' }}>
                                 Plan
                               </Link>
                             </div>
