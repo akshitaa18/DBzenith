@@ -28,19 +28,21 @@ export function QueryDetails() {
   const [isSimulating, setIsSimulating] = useState(false)
   const [isDeciding, setIsDeciding] = useState(false)
 
-  const loadQuery = (id: number) => {
+  const loadQuery = (id: string | number) => {
+    const idStr = String(id).trim()
+    if (!idStr) return
     setLoading(true)
     setError(null)
     Promise.all([
-      getQueryDetail(id),
-      getQueryOptimizationTrace(id).catch(() => null),
+      getQueryDetail(idStr),
+      getQueryOptimizationTrace(idStr).catch(() => null),
     ])
       .then(([qData, tData]) => {
         setDetail(qData)
         setTraceData(tData)
       })
       .catch((err) => {
-        setError(err.message || `Query ID ${id} not found in telemetry store.`)
+        setError(err.message || `Query ID ${idStr} not found in telemetry store.`)
         setDetail(null)
         setTraceData(null)
       })
@@ -49,21 +51,20 @@ export function QueryDetails() {
 
   useEffect(() => {
     const idParam = searchParams.get('id')
-    if (idParam) {
-      const idNum = Number(idParam)
-      if (idNum) {
-        setQueryIdInput(String(idNum))
-        loadQuery(idNum)
-        return
-      }
+    if (idParam && idParam.trim()) {
+      const cleanId = idParam.trim()
+      setQueryIdInput(cleanId)
+      loadQuery(cleanId)
+      return
     }
     setLoading(true)
     getSlowQueries(1, 1)
       .then((data) => {
         if (data.items && data.items.length > 0) {
           const top = data.items[0]
-          setQueryIdInput(String(top.id || top.query_id))
-          loadQuery(top.query_id)
+          const chosenId = String(top.query_id || top.id)
+          setQueryIdInput(chosenId)
+          loadQuery(chosenId)
         }
       })
       .catch(() => {})
@@ -72,9 +73,9 @@ export function QueryDetails() {
 
   const handleLookup = (e: React.FormEvent) => {
     e.preventDefault()
-    const num = Number(queryIdInput.trim())
-    if (num) {
-      setSearchParams({ id: String(num) })
+    const trimmed = queryIdInput.trim()
+    if (trimmed) {
+      setSearchParams({ id: trimmed })
     }
   }
 
@@ -156,12 +157,12 @@ export function QueryDetails() {
       <form onSubmit={handleLookup} className="card filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
         <label style={{ fontSize: '12px', fontWeight: 600 }}>Query ID:</label>
         <input
-          type="number"
+          type="text"
           className="filter-input"
-          style={{ width: '180px' }}
+          style={{ width: '240px', fontFamily: 'monospace' }}
           value={queryIdInput}
           onChange={(e) => setQueryIdInput(e.target.value)}
-          placeholder="e.g. 101"
+          placeholder="e.g. -4180483195914191103 or row ID"
         />
         <button type="submit" className="primary-button" style={{ padding: '8px 16px' }} disabled={loading}>
           {loading ? 'Inspecting...' : 'Inspect Query'}

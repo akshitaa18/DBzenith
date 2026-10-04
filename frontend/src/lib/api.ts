@@ -93,7 +93,7 @@ export function getSlowQueries(page = 1, pageSize = 10, minMeanMs?: number): Pro
   return request(`/api/v1/queries/slow?${params}`)
 }
 
-export function getQueryDetail(queryId: number): Promise<QueryDetail> {
+export function getQueryDetail(queryId: number | string): Promise<QueryDetail> {
   return request(`/api/v1/queries/${queryId}`)
 }
 
@@ -329,7 +329,7 @@ export type QueryOptimizationTrace = {
   }>
 }
 
-export function getQueryOptimizationTrace(queryId: number): Promise<QueryOptimizationTrace> {
+export function getQueryOptimizationTrace(queryId: number | string): Promise<QueryOptimizationTrace> {
   return request(`/api/v1/queries/${queryId}/trace`)
 }
 

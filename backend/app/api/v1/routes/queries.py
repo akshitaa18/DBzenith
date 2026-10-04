@@ -51,10 +51,25 @@ def slow_queries(
 
 
 @router.get("/{query_id}", response_model=QueryDetail)
-def query_detail(query_id: int, db: Session = Depends(get_db)) -> QueryDetail:
+def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
+    """Retrieves query statistics by PostgreSQL queryid or internal table row id."""
+    try:
+        ident_num = int(query_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid_query_id_format")
+
+    INT32_MIN = -2147483648
+    INT32_MAX = 2147483647
+
+    # Check by PostgreSQL query_id first; include primary key row id only if ident_num fits in 32-bit integer
+    if INT32_MIN <= ident_num <= INT32_MAX:
+        cond = (QueryStatistic.query_id == ident_num) | (QueryStatistic.id == ident_num)
+    else:
+        cond = (QueryStatistic.query_id == ident_num)
+
     row = db.scalar(
         select(QueryStatistic)
-        .where(QueryStatistic.query_id == query_id)
+        .where(cond)
         .order_by(desc(QueryStatistic.id))
         .limit(1)
     )
@@ -64,20 +79,35 @@ def query_detail(query_id: int, db: Session = Depends(get_db)) -> QueryDetail:
 
 
 @router.get("/{query_id}/trace")
-def query_optimization_trace(query_id: int, db: Session = Depends(get_db)) -> dict:
+def query_optimization_trace(query_id: str, db: Session = Depends(get_db)) -> dict:
     from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
     from app.models.simulation import OptimizationSimulation
     from app.schemas.recommendations import RecommendationResponse
     from app.schemas.simulations import SimulationResponse
 
+    try:
+        ident_num = int(query_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid_query_id_format")
+
+    INT32_MIN = -2147483648
+    INT32_MAX = 2147483647
+
+    if INT32_MIN <= ident_num <= INT32_MAX:
+        cond = (QueryStatistic.query_id == ident_num) | (QueryStatistic.id == ident_num)
+    else:
+        cond = (QueryStatistic.query_id == ident_num)
+
     row = db.scalar(
         select(QueryStatistic)
-        .where(QueryStatistic.query_id == query_id)
+        .where(cond)
         .order_by(desc(QueryStatistic.id))
         .limit(1)
     )
     if row is None:
         raise HTTPException(status_code=404, detail="query_not_found")
+
+    effective_query_id = row.query_id
 
     # Match recommendations by affected queries or table mention
     all_recs = db.query(OptimizationRecommendation).all()
@@ -86,7 +116,7 @@ def query_optimization_trace(query_id: int, db: Session = Depends(get_db)) -> di
         is_affected = False
         if r.affected_queries:
             for aq in r.affected_queries:
-                if isinstance(aq, dict) and aq.get("query_id") == query_id:
+                if isinstance(aq, dict) and aq.get("query_id") == effective_query_id:
                     is_affected = True
                     break
         if not is_affected and r.target and r.target.lower() in row.normalized_query.lower():
