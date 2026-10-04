@@ -16,8 +16,11 @@ class GNNRegistry:
         self.version="v0.7.0-synth-20261003"
         self.metrics=json.loads((model_dir/"metrics.json").read_text())
         self.normalizer=json.loads((model_dir/"normalizer.json").read_text())
-        self.model=BottleneckGNN(self.metrics["feature_count"],32,len(ID_TO_LABEL))
-        self.model.load_state_dict(torch.load(model_dir/"gnn.pt",map_location="cpu"))
+        state_dict = torch.load(model_dir / "gnn.pt", map_location="cpu")
+        has_self_lin = "conv1.self_lin.weight" in state_dict
+        uses_pyg = False if has_self_lin else bool(self.metrics.get("pyg_available", False))
+        self.model = BottleneckGNN(self.metrics["feature_count"], 32, len(ID_TO_LABEL), uses_pyg=uses_pyg)
+        self.model.load_state_dict(state_dict)
         self.model.eval()
 
     def predict(self, node_features, edge_index, edge_features=None):

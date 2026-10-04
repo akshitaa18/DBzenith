@@ -66,34 +66,36 @@ export function OptimizationTrace({
 
   // Extract detected bottleneck information
   const bottleneckType =
-    planAnalysis?.bottlenecks?.[0]?.type ||
-    (recommendation?.type ? recommendation.type.replace('_', ' ').toUpperCase() : null) ||
-    (query && (query.mean_exec_time_ms ?? 0) > 50 ? 'Sequential Scan / Unindexed Predicate' : 'High Latency Query')
+    planAnalysis?.bottlenecks?.[0]?.type?.replace(/_/g, ' ').toUpperCase() ||
+    (recommendation?.type ? recommendation.type.replace(/_/g, ' ').toUpperCase() : null) ||
+    'Awaiting analysis'
 
-  const bottleneckSeverity = planAnalysis?.bottlenecks?.[0]?.severity || (recommendation?.risk === 'high' ? 'HIGH' : 'MEDIUM')
+  const bottleneckSeverity =
+    planAnalysis?.bottlenecks?.[0]?.severity?.toUpperCase() ||
+    (recommendation?.risk ? recommendation.risk.toUpperCase() : 'MEDIUM')
 
   const bottleneckWhy =
     planAnalysis?.bottlenecks?.[0]?.explanation ||
     recommendation?.reason ||
     rewrite?.reason ||
-    'PostgreSQL query planner performs heap-level sequential scanning or unindexed sorting, resulting in excessive disk I/O and latency amplification.'
+    'Awaiting GNN bottleneck analysis to extract structural plan evidence.'
 
   // Optimization type determination
   const optimizationType =
     (rewrite ? 'Query Rewrite (AST)' : null) ||
     (recommendation?.type ? recommendation.type.toUpperCase() : null) ||
-    'Index Optimization'
+    'Index Recommendation'
 
   // Proposed change / SQL
   const proposedChange =
     rewrite?.rewritten_query ||
     recommendation?.proposed_change ||
-    (planAnalysis?.bottlenecks?.[0]?.possible_remediation) ||
-    'CREATE INDEX CONCURRENTLY ON target_table (filter_column);'
+    planAnalysis?.bottlenecks?.[0]?.possible_remediation ||
+    'Awaiting candidate recommendation'
 
   // Cost and latency numbers
   const baselineCost = simulation?.baseline_cost ?? (planAnalysis?.features?.total_cost ? Number(planAnalysis.features.total_cost) : null)
-  const proposedCost = simulation?.proposed_cost ?? (rewrite?.cost_improvement_pct && baselineCost ? baselineCost * (1 - rewrite.cost_improvement_pct / 100) : null)
+  const proposedCost = simulation?.proposed_cost ?? null
   const improvementPct =
     simulation?.improvement ??
     rewrite?.cost_improvement_pct ??
@@ -101,20 +103,18 @@ export function OptimizationTrace({
 
   const latencyBefore = query?.mean_exec_time_ms ? formatMs(query.mean_exec_time_ms) : 'Not measured'
   const latencyAfter =
-    query?.mean_exec_time_ms && improvementPct && improvementPct > 0
-      ? formatMs(query.mean_exec_time_ms * (1 - improvementPct / 100))
-      : simulation?.benchmark?.simulated_latency_ms
+    simulation?.benchmark?.simulated_latency_ms
       ? formatMs(Number(simulation.benchmark.simulated_latency_ms))
-      : 'Awaiting validation'
+      : 'Awaiting sandbox simulation'
 
   const confidenceScore =
     recommendation?.confidence !== undefined
       ? `${(recommendation.confidence * 100).toFixed(1)}%`
       : rewrite?.confidence !== undefined
       ? `${(rewrite.confidence * 100).toFixed(1)}%`
-      : '92.5%'
+      : 'Awaiting validation'
 
-  const riskScore = recommendation?.risk || 'Low (Concurrent creation, zero production table locks)'
+  const riskScore = recommendation?.risk || 'Low'
 
   const originalSql =
     query?.normalized_query ||
@@ -250,11 +250,16 @@ export function OptimizationTrace({
 
           {/* Step 6: Before vs After Comparison */}
           <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px 14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <span className="badge badge-simulation">STAGE 6: BEFORE VS AFTER COMPARISON</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge badge-simulation">STAGE 6: BEFORE VS AFTER COMPARISON</span>
+                <span className="badge" style={{ background: '#065f46', color: '#34d399', fontSize: '10px' }}>
+                  SIMULATED — NOT APPLIED TO PRODUCTION
+                </span>
+              </div>
               {improvementPct !== null && (
                 <span style={{ fontSize: '13px', fontWeight: 700, color: '#10b981' }}>
-                  ⚡ Estimated Latency Delta: -{improvementPct.toFixed(1)}%
+                  ⚡ Estimated Plan Cost Delta: -{improvementPct.toFixed(1)}%
                 </span>
               )}
             </div>

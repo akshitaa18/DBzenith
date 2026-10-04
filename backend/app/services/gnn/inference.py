@@ -8,8 +8,16 @@ from .registry import GNNRegistry
 
 
 def infer(graph, model_dir: Path):
-    sample=build_graph_sample(graph)
-    registry=GNNRegistry(model_dir)
-    predictions=registry.predict(sample.node_features,sample.edge_index,sample.edge_features)
-    explanations=explain_predictions(predictions,graph)
-    return {"model_version":registry.version,"model_type":"GCN" if registry.metrics.get("pyg_available") else "GCN-compatible message-passing fallback","validation_metrics":registry.metrics["gnn"],"predictions":explanations}
+    sample = build_graph_sample(graph)
+    registry = GNNRegistry(model_dir)
+    predictions = registry.predict(sample.node_features, sample.edge_index, sample.edge_features)
+    explanations = explain_predictions(predictions, graph)
+    return {
+        "model_version": registry.version,
+        "model_type": "GCN" if registry.metrics.get("pyg_available") else "GCN-compatible message-passing fallback",
+        "validation_metrics": registry.metrics["gnn"],
+        "predictions": explanations["node_predictions"],
+        "summary": explanations["summary"],
+        "flagged_bottlenecks": explanations["flagged_bottlenecks"],
+        "architecture_flow": explanations["architecture_flow"],
+    }

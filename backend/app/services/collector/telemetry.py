@@ -160,6 +160,24 @@ class TelemetryCollector:
             LEFT JOIN pg_roles u ON u.oid = s.userid
             WHERE s.queryid IS NOT NULL
               AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+              AND s.query NOT ILIKE '%workload_snapshots%'
+              AND s.query NOT ILIKE '%query_statistics%'
+              AND s.query NOT ILIKE '%relation_statistics%'
+              AND s.query NOT ILIKE '%plan_analyses%'
+              AND s.query NOT ILIKE '%optimization_recommendations%'
+              AND s.query NOT ILIKE '%optimization_simulations%'
+              AND s.query NOT ILIKE '%recommendation_audit_events%'
+              AND s.query NOT ILIKE '%audit_events%'
+              AND s.query NOT ILIKE '%pg_stat_statements%'
+              AND s.query NOT ILIKE '%pg_qualstats%'
+              AND s.query NOT ILIKE '%information_schema%'
+              AND s.query NOT ILIKE '%alembic_version%'
+              AND s.query NOT ILIKE 'BEGIN%'
+              AND s.query NOT ILIKE 'COMMIT%'
+              AND s.query NOT ILIKE 'ROLLBACK%'
+              AND s.query NOT ILIKE 'SAVEPOINT%'
+              AND s.query NOT ILIKE 'RELEASE%'
+              AND s.query NOT ILIKE 'DEALLOCATE%'
             ORDER BY s.total_exec_time DESC
             LIMIT :limit
         """
@@ -256,7 +274,15 @@ class TelemetryCollector:
     @staticmethod
     def _is_safe_explain_candidate(query: str) -> bool:
         cleaned = query.lstrip().lower()
-        return cleaned.startswith(("select ", "with ", "values ", "show "))
+        if not cleaned.startswith(("select ", "with ", "values ")):
+            return False
+        internal_markers = (
+            "workload_snapshots", "query_statistics", "relation_statistics",
+            "plan_analyses", "optimization_recommendations", "optimization_simulations",
+            "recommendation_audit_events", "audit_events", "pg_stat_statements",
+            "pg_qualstats", "information_schema", "alembic_version",
+        )
+        return not any(marker in cleaned for marker in internal_markers)
 
     def _explain(self, db: Session, query: str) -> list | dict | None:
         if "$" in query:

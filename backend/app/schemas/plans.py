@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class PlanAnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query_id: int | None = None
+    query_id: int | str | None = None
     sql: str | None = Field(default=None, min_length=1, max_length=1_000_000)
     plan: dict[str, Any] | list[Any] | None = None
 

@@ -17,6 +17,26 @@ def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 
     stmt = (
         select(QueryStatistic)
         .join(latest, QueryStatistic.id == latest.c.max_id)
+        .where(
+            ~QueryStatistic.normalized_query.ilike("%workload_snapshots%"),
+            ~QueryStatistic.normalized_query.ilike("%query_statistics%"),
+            ~QueryStatistic.normalized_query.ilike("%relation_statistics%"),
+            ~QueryStatistic.normalized_query.ilike("%plan_analyses%"),
+            ~QueryStatistic.normalized_query.ilike("%optimization_recommendations%"),
+            ~QueryStatistic.normalized_query.ilike("%optimization_simulations%"),
+            ~QueryStatistic.normalized_query.ilike("%recommendation_audit_events%"),
+            ~QueryStatistic.normalized_query.ilike("%audit_events%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_stat_statements%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_qualstats%"),
+            ~QueryStatistic.normalized_query.ilike("%information_schema%"),
+            ~QueryStatistic.normalized_query.ilike("%alembic_version%"),
+            ~QueryStatistic.normalized_query.ilike("BEGIN%"),
+            ~QueryStatistic.normalized_query.ilike("COMMIT%"),
+            ~QueryStatistic.normalized_query.ilike("ROLLBACK%"),
+            ~QueryStatistic.normalized_query.ilike("SAVEPOINT%"),
+            ~QueryStatistic.normalized_query.ilike("RELEASE%"),
+            ~QueryStatistic.normalized_query.ilike("DEALLOCATE%"),
+        )
         .order_by(desc(QueryStatistic.mean_exec_time_ms), desc(QueryStatistic.calls))
     )
     if slow_only:
@@ -147,10 +167,31 @@ def query_optimization_trace(query_id: str, db: Session = Depends(get_db)) -> di
             .all()
         )
 
+    # Find latest plan analysis for this query if available
+    from app.models.plan import PlanAnalysis
+    from app.schemas.plans import PlanAnalysisResponse
+    latest_plan = (
+        db.query(PlanAnalysis)
+        .filter(PlanAnalysis.query_id == effective_query_id)
+        .order_by(PlanAnalysis.id.desc())
+        .first()
+    )
+
     return {
         "query": QueryDetail.from_model(row).model_dump(),
         "matching_recommendations": [RecommendationResponse.model_validate(r).model_dump() for r in matching_recs],
         "latest_simulation": SimulationResponse.model_validate(latest_sim).model_dump() if latest_sim else None,
+        "plan_analysis": PlanAnalysisResponse(
+            id=latest_plan.id,
+            created_at=latest_plan.created_at,
+            query_id=latest_plan.query_id,
+            structural_hash=latest_plan.structural_hash,
+            sanitized_plan=latest_plan.sanitized_plan,
+            graph=latest_plan.graph,
+            features=latest_plan.features,
+            bottlenecks=latest_plan.bottlenecks,
+            explanation=latest_plan.explanation,
+        ).model_dump() if latest_plan else None,
         "audit_events": [
             {
                 "id": e.id,

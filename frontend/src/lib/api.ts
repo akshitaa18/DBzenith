@@ -113,8 +113,11 @@ export type PlanAnalysis = {
   explanation: { summary: string; feature_highlights: Record<string, number>; method: string; gnn?: any }
 }
 
-export function analyzePlan(sql: string): Promise<PlanAnalysis> {
-  return request('/api/v1/plans/analyze', jsonBody({ sql }))
+export function analyzePlan(
+  arg: string | { sql?: string; query_id?: number | string; plan?: unknown }
+): Promise<PlanAnalysis> {
+  const payload = typeof arg === 'string' ? { sql: arg } : arg
+  return request('/api/v1/plans/analyze', jsonBody(payload))
 }
 
 export function getPlanAnalysis(id: number): Promise<PlanAnalysis> {
@@ -319,6 +322,7 @@ export type QueryOptimizationTrace = {
   query: QueryDetail
   matching_recommendations: Recommendation[]
   latest_simulation: Simulation | null
+  plan_analysis?: PlanAnalysis | null
   audit_events: Array<{
     id: number
     created_at: string | null

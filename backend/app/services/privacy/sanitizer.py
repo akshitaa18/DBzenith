@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 from typing import Any
 
@@ -122,10 +123,10 @@ def sanitize_plan(raw: RawPlan) -> SanitizedPlan:
     operators: list[str] = []
     relation_tokens: list[str] = []
     safe = _sanitize_plan_value(raw.plan, relation_tokens, operators)
-    canonical = repr(safe).encode("utf-8")
+    canonical = json.dumps(safe, sort_keys=True, separators=(",", ":"), default=str)
     return SanitizedPlan(
         plan=safe,
-        structural_hash=hashlib.sha256(canonical).hexdigest(),
+        structural_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         operator_types=sorted(set(operators)),
         relation_tokens=sorted(set(relation_tokens)),
     )

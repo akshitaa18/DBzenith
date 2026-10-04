@@ -41,10 +41,10 @@ class _MessageLayer(nn.Module):
 
 class BottleneckGNN(nn.Module):
     """GCN when PyG is installed; equivalent message-passing fallback for constrained builds."""
-    def __init__(self, in_features: int, hidden: int, classes: int):
+    def __init__(self, in_features: int, hidden: int, classes: int, uses_pyg: bool | None = None):
         super().__init__()
-        self.uses_pyg = HAS_PYG
-        if HAS_PYG:
+        self.uses_pyg = HAS_PYG if uses_pyg is None else (uses_pyg and HAS_PYG)
+        if self.uses_pyg:
             self.conv1 = GCNConv(in_features, hidden)
             self.conv2 = GCNConv(hidden, hidden)
         else:
