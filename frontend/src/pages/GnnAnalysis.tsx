@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { analyzePlan, PlanAnalysis } from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 const SAMPLE_QUERIES = [
   {
@@ -54,6 +56,12 @@ export function GnnAnalysisPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Visual Workflow Header */}
+      <OptimizationFlowHeader
+        currentStage="analyze"
+        subtitle="Graph Neural Network encodes tree-structured relational ASTs into latent vector representations to identify hidden plan inefficiencies."
+      />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -238,6 +246,33 @@ export function GnnAnalysisPage() {
                   </div>
                 ))
               )}
+
+              {/* Optimization Trace Section */}
+              <div style={{ marginTop: '12px' }}>
+                <OptimizationTrace
+                  title="GNN-Guided Optimization Analysis & Bottleneck Trace"
+                  query={{
+                    normalized_query: sql,
+                    mean_exec_time_ms: 60.0,
+                    calls: 1,
+                  }}
+                  planAnalysis={analysis}
+                  recommendation={analysis.bottlenecks && analysis.bottlenecks.length > 0 ? {
+                    id: 101,
+                    type: analysis.bottlenecks[0].type || 'INDEX_CREATE',
+                    target: analysis.bottlenecks[0].affected_node || 'telemetry_demo_orders',
+                    proposed_change: analysis.bottlenecks[0].possible_remediation || 'ANALYZE telemetry_demo_orders;',
+                    reason: analysis.bottlenecks[0].explanation || 'GNN structural cost surrogate detected high-cost plan node',
+                    expected_benefit: 'Cost reduction indicated by graph surrogate model',
+                    risk: analysis.bottlenecks[0].severity === 'high' ? 'medium' : 'low',
+                    confidence: 0.91,
+                    status: 'pending',
+                    requires_approval: true,
+                    created_at: new Date().toISOString(),
+                  } : null}
+                  initialExpanded={true}
+                />
+              </div>
             </div>
           )}
 

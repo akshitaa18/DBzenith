@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { listSimulations, Simulation } from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 export function SimulationsPage() {
   const [simulations, setSimulations] = useState<Simulation[]>([])
@@ -29,6 +31,12 @@ export function SimulationsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Visual Workflow Header */}
+      <OptimizationFlowHeader
+        currentStage="simulate"
+        subtitle="Empirical sandbox evaluation using PostgreSQL HypoPG virtual indexes to measure exact execution cost and verify zero regression before DBA sign-off."
+      />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -254,6 +262,33 @@ export function SimulationsPage() {
                       <li key={idx}>{lim}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {/* Complete Optimization Trace */}
+              {selectedSim && (
+                <div style={{ marginTop: '10px' }}>
+                  <h4 style={{ fontSize: '0.9rem', color: '#94a3b8', margin: '0 0 10px 0', textTransform: 'uppercase' }}>
+                    End-to-End Optimization Trace for Simulation #{selectedSim.id}
+                  </h4>
+                  <OptimizationTrace
+                    title={`Simulation #${selectedSim.id} Optimization Trace`}
+                    simulation={selectedSim}
+                    recommendation={selectedSim.recommendation_id ? {
+                      id: selectedSim.recommendation_id,
+                      type: 'INDEX_CREATE',
+                      target: 'simulated_relation',
+                      proposed_change: 'HYPOPG VIRTUAL INDEX SIMULATION',
+                      reason: 'Evaluated in isolated sandbox session',
+                      expected_benefit: `${((selectedSim.improvement ?? 0) * 100).toFixed(1)}% cost reduction`,
+                      risk: 'low',
+                      confidence: selectedSim.confidence ?? 0.85,
+                      status: 'pending',
+                      requires_approval: true,
+                      created_at: selectedSim.created_at,
+                    } : null}
+                    initialExpanded={true}
+                  />
                 </div>
               )}
             </div>

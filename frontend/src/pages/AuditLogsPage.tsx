@@ -4,6 +4,7 @@ import {
   getRecommendationAuditEvents,
   RecommendationAuditEvent,
 } from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 
 type AssistantAuditItem = {
   timestamp: string
@@ -69,6 +70,12 @@ export function AuditLogsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Visual Workflow Header */}
+      <OptimizationFlowHeader
+        currentStage="audit"
+        subtitle="Final verification step of the optimization lifecycle. Every recommendation change, sandbox test, approval decision, and assistant action is cryptographically and immutably recorded."
+      />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>

@@ -61,3 +61,75 @@ def query_detail(query_id: int, db: Session = Depends(get_db)) -> QueryDetail:
     if row is None:
         raise HTTPException(status_code=404, detail="query_not_found")
     return QueryDetail.from_model(row)
+
+
+@router.get("/{query_id}/trace")
+def query_optimization_trace(query_id: int, db: Session = Depends(get_db)) -> dict:
+    from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
+    from app.models.simulation import OptimizationSimulation
+    from app.schemas.recommendations import RecommendationResponse
+    from app.schemas.simulations import SimulationResponse
+
+    row = db.scalar(
+        select(QueryStatistic)
+        .where(QueryStatistic.query_id == query_id)
+        .order_by(desc(QueryStatistic.id))
+        .limit(1)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="query_not_found")
+
+    # Match recommendations by affected queries or table mention
+    all_recs = db.query(OptimizationRecommendation).all()
+    matching_recs = []
+    for r in all_recs:
+        is_affected = False
+        if r.affected_queries:
+            for aq in r.affected_queries:
+                if isinstance(aq, dict) and aq.get("query_id") == query_id:
+                    is_affected = True
+                    break
+        if not is_affected and r.target and r.target.lower() in row.normalized_query.lower():
+            is_affected = True
+        if is_affected:
+            matching_recs.append(r)
+
+    # Find latest simulation among matching recommendations
+    latest_sim = None
+    if matching_recs:
+        rec_ids = [r.id for r in matching_recs]
+        latest_sim = (
+            db.query(OptimizationSimulation)
+            .filter(OptimizationSimulation.recommendation_id.in_(rec_ids))
+            .order_by(OptimizationSimulation.id.desc())
+            .first()
+        )
+
+    # Find audit events
+    audit_events = []
+    if matching_recs:
+        rec_ids = [r.id for r in matching_recs]
+        audit_events = (
+            db.query(RecommendationAuditEvent)
+            .filter(RecommendationAuditEvent.recommendation_id.in_(rec_ids))
+            .order_by(RecommendationAuditEvent.created_at.desc())
+            .limit(10)
+            .all()
+        )
+
+    return {
+        "query": QueryDetail.from_model(row).model_dump(),
+        "matching_recommendations": [RecommendationResponse.model_validate(r).model_dump() for r in matching_recs],
+        "latest_simulation": SimulationResponse.model_validate(latest_sim).model_dump() if latest_sim else None,
+        "audit_events": [
+            {
+                "id": e.id,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "action": e.action,
+                "previous_status": e.previous_status,
+                "new_status": e.new_status,
+                "reason": e.reason,
+            }
+            for e in audit_events
+        ],
+    }

@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { analyzePlan, type PlanAnalysis } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 export function PlanViewer() {
   const [searchParams] = useSearchParams()
-  const [sql, setSql] = useState("SELECT id, customer_id, amount FROM telemetry_demo_orders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50")
+  const initialSql =
+    searchParams.get('sql') ||
+    "SELECT id, customer_id, amount FROM telemetry_demo_orders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50"
+  const [sql, setSql] = useState(initialSql)
   const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,12 +38,15 @@ export function PlanViewer() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
           <span className="badge badge-observed">OBSERVED: PostgreSQL EXPLAIN</span>
           <span className="badge badge-ai-analysis">AI ANALYSIS: AST & Node Parser</span>
+          <span className="badge badge-recommendation">Optimization Ready</span>
         </div>
         <h1 style={{ fontSize: '2.2rem', margin: 0 }}>Execution Plan Viewer</h1>
         <p className="subtitle" style={{ fontSize: '0.95rem', color: '#64748b' }}>
-          Interactive planner cost evaluation. Plans queries safely without ANALYZE execution side-effects.
+          Interactive planner cost evaluation. Explains queries safely and maps plan bottlenecks to DBZenith optimizations.
         </p>
       </div>
+
+      <OptimizationFlowHeader currentStage="analyze" />
 
       <article className="card section-card" style={{ marginBottom: '20px' }}>
         <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '8px' }}>
@@ -105,7 +113,7 @@ export function PlanViewer() {
             </article>
           </div>
 
-          <article className="card section-card">
+          <article className="card section-card" style={{ marginBottom: '20px' }}>
             <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
                 <h2 style={{ margin: 0 }}>Visual Execution Plan Tree</h2>
@@ -116,6 +124,18 @@ export function PlanViewer() {
 
             <PlanVisualization analysis={analysis} />
           </article>
+
+          {/* Dedicated Optimization Trace for this execution plan */}
+          <OptimizationTrace
+            title="Plan Optimization Trace & Bottleneck Remediation"
+            query={{
+              normalized_query: sql,
+              mean_exec_time_ms: 75.0,
+              calls: 1,
+            }}
+            planAnalysis={analysis}
+            initialExpanded={true}
+          />
         </>
       )}
     </section>

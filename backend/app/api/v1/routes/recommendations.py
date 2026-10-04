@@ -64,6 +64,84 @@ def get_recommendation(recommendation_id: int, db: Session = Depends(get_db)) ->
     return _response(row)
 
 
+@router.get("/{recommendation_id}/trace")
+def get_recommendation_trace(recommendation_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.models.simulation import OptimizationSimulation
+    from app.models.workload import QueryStatistic
+    from app.schemas.simulations import SimulationResponse
+
+    row = db.get(OptimizationRecommendation, recommendation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="recommendation_not_found")
+
+    sim = (
+        db.query(OptimizationSimulation)
+        .filter(OptimizationSimulation.recommendation_id == recommendation_id)
+        .order_by(OptimizationSimulation.id.desc())
+        .first()
+    )
+
+    audit_events = (
+        db.query(RecommendationAuditEvent)
+        .filter(RecommendationAuditEvent.recommendation_id == recommendation_id)
+        .order_by(RecommendationAuditEvent.created_at.desc())
+        .all()
+    )
+
+    matching_queries: list[dict[str, Any]] = []
+    if row.affected_queries:
+        for aq in row.affected_queries:
+            qid = aq.get("query_id") if isinstance(aq, dict) else None
+            if qid:
+                stat = db.query(QueryStatistic).filter(QueryStatistic.query_id == qid).order_by(QueryStatistic.id.desc()).first()
+                if stat:
+                    matching_queries.append({
+                        "query_id": stat.query_id,
+                        "normalized_query": stat.normalized_query,
+                        "mean_exec_time_ms": stat.mean_exec_time_ms,
+                        "calls": stat.calls,
+                        "total_exec_time_ms": stat.total_exec_time_ms,
+                        "rows": stat.rows,
+                        "explain_plan": stat.explain_plan,
+                    })
+
+    if not matching_queries and row.target:
+        stats = (
+            db.query(QueryStatistic)
+            .filter(QueryStatistic.normalized_query.ilike(f"%{row.target}%"))
+            .order_by(QueryStatistic.total_exec_time_ms.desc())
+            .limit(3)
+            .all()
+        )
+        for stat in stats:
+            matching_queries.append({
+                "query_id": stat.query_id,
+                "normalized_query": stat.normalized_query,
+                "mean_exec_time_ms": stat.mean_exec_time_ms,
+                "calls": stat.calls,
+                "total_exec_time_ms": stat.total_exec_time_ms,
+                "rows": stat.rows,
+                "explain_plan": stat.explain_plan,
+            })
+
+    return {
+        "recommendation": _response(row).model_dump(),
+        "simulation": SimulationResponse.model_validate(sim).model_dump() if sim else None,
+        "audit_events": [
+            {
+                "id": e.id,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "action": e.action,
+                "previous_status": e.previous_status,
+                "new_status": e.new_status,
+                "reason": e.reason,
+            }
+            for e in audit_events
+        ],
+        "matching_queries": matching_queries,
+    }
+
+
 
 from fastapi import Request
 from app.core.auth import get_current_user_optional, require_dba_or_admin

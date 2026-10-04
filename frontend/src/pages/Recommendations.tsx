@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getRecommendations, Recommendation, createSimulation, Simulation } from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 export function RecommendationsPage() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
@@ -11,6 +13,7 @@ export function RecommendationsPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [expandedTraceId, setExpandedTraceId] = useState<number | null>(null)
 
   // Side-by-side comparison state
   const [selectedForCompare, setSelectedForCompare] = useState<number[]>([])
@@ -84,6 +87,12 @@ export function RecommendationsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Visual Workflow Header */}
+      <OptimizationFlowHeader
+        currentStage="recommend"
+        subtitle="Optimization candidates synthesized from EXPLAIN bottlenecks, table bloat statistics, and RL policy scoring. Click 'Inspect Full Optimization Trace' on any card to evaluate."
+      />
+
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -266,6 +275,13 @@ export function RecommendationsPage() {
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                      onClick={() => setExpandedTraceId(expandedTraceId === rec.id ? null : rec.id)}
+                    >
+                      {expandedTraceId === rec.id ? 'Hide Trace' : '🔍 Inspect Trace'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
                       onClick={() => toggleSelectForCompare(rec.id)}
                     >
                       {isComparing ? '✓ Selected' : '+ Compare'}
@@ -345,6 +361,20 @@ export function RecommendationsPage() {
                     Created: <span style={{ color: '#94a3b8' }}>{new Date(rec.created_at).toLocaleString()}</span>
                   </div>
                 </div>
+
+                {/* Expandable Optimization Trace */}
+                {expandedTraceId === rec.id && (
+                  <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #334155' }}>
+                    <OptimizationTrace
+                      title={`End-to-End Optimization Trace: Recommendation #${rec.id}`}
+                      recommendation={rec}
+                      simulation={simulationResult?.recommendation_id === rec.id ? simulationResult : undefined}
+                      onSimulate={(id) => handleSimulate(id)}
+                      isSimulating={simulatingId === rec.id}
+                      initialExpanded={true}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}

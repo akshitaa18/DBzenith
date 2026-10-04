@@ -289,3 +289,47 @@ export type SQLRewriteResponse = {
 export function rewriteSql(sql: string, validateSandbox = true): Promise<SQLRewriteResponse> {
   return request('/api/v1/rewriter/rewrite', jsonBody({ sql, validate_sandbox: validateSandbox }))
 }
+
+export type QueryOptimizationTrace = {
+  query: QueryDetail
+  matching_recommendations: Recommendation[]
+  latest_simulation: Simulation | null
+  audit_events: Array<{
+    id: number
+    created_at: string | null
+    action: string
+    previous_status: string | null
+    new_status: string
+    reason: string
+  }>
+}
+
+export function getQueryOptimizationTrace(queryId: number): Promise<QueryOptimizationTrace> {
+  return request(`/api/v1/queries/${queryId}/trace`)
+}
+
+export type RecommendationTrace = {
+  recommendation: Recommendation
+  simulation: Simulation | null
+  audit_events: Array<{
+    id: number
+    created_at: string | null
+    action: string
+    previous_status: string | null
+    new_status: string
+    reason: string
+  }>
+  matching_queries: Array<{
+    query_id: number
+    normalized_query: string
+    mean_exec_time_ms: number
+    calls: number
+    total_exec_time_ms: number
+    rows: number
+    explain_plan: unknown
+  }>
+}
+
+export function getRecommendationTrace(recommendationId: number): Promise<RecommendationTrace> {
+  return request(`/api/v1/recommendations/${recommendationId}/trace`)
+}

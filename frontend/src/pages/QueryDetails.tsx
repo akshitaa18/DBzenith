@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { getQueryDetail, getSlowQueries, type QueryDetail } from '../lib/api'
+import {
+  getQueryDetail,
+  getSlowQueries,
+  getQueryOptimizationTrace,
+  createSimulation,
+  approveRecommendation,
+  rejectRecommendation,
+  type QueryDetail,
+  type QueryOptimizationTrace,
+} from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
@@ -10,20 +21,28 @@ export function QueryDetails() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [queryIdInput, setQueryIdInput] = useState('')
   const [detail, setDetail] = useState<QueryDetail | null>(null)
+  const [traceData, setTraceData] = useState<QueryOptimizationTrace | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [isSimulating, setIsSimulating] = useState(false)
+  const [isDeciding, setIsDeciding] = useState(false)
 
   const loadQuery = (id: number) => {
     setLoading(true)
     setError(null)
-    getQueryDetail(id)
-      .then((data) => {
-        setDetail(data)
+    Promise.all([
+      getQueryDetail(id),
+      getQueryOptimizationTrace(id).catch(() => null),
+    ])
+      .then(([qData, tData]) => {
+        setDetail(qData)
+        setTraceData(tData)
       })
       .catch((err) => {
         setError(err.message || `Query ID ${id} not found in telemetry store.`)
         setDetail(null)
+        setTraceData(null)
       })
       .finally(() => setLoading(false))
   }
@@ -44,7 +63,7 @@ export function QueryDetails() {
         if (data.items && data.items.length > 0) {
           const top = data.items[0]
           setQueryIdInput(String(top.id || top.query_id))
-          setDetail(top)
+          loadQuery(top.query_id)
         }
       })
       .catch(() => {})
@@ -56,6 +75,51 @@ export function QueryDetails() {
     const num = Number(queryIdInput.trim())
     if (num) {
       setSearchParams({ id: String(num) })
+    }
+  }
+
+  const handleSimulate = async (recId: number) => {
+    setIsSimulating(true)
+    try {
+      await createSimulation(recId, 3)
+      if (detail) {
+        const refreshed = await getQueryOptimizationTrace(detail.query_id)
+        setTraceData(refreshed)
+      }
+    } catch (err: any) {
+      alert(`Simulation failed: ${err.message}`)
+    } finally {
+      setIsSimulating(false)
+    }
+  }
+
+  const handleApprove = async (recId: number) => {
+    setIsDeciding(true)
+    try {
+      await approveRecommendation(recId, 'Approved via Query Details')
+      if (detail) {
+        const refreshed = await getQueryOptimizationTrace(detail.query_id)
+        setTraceData(refreshed)
+      }
+    } catch (err: any) {
+      alert(`Approval failed: ${err.message}`)
+    } finally {
+      setIsDeciding(false)
+    }
+  }
+
+  const handleReject = async (recId: number) => {
+    setIsDeciding(true)
+    try {
+      await rejectRecommendation(recId, 'Rejected via Query Details')
+      if (detail) {
+        const refreshed = await getQueryOptimizationTrace(detail.query_id)
+        setTraceData(refreshed)
+      }
+    } catch (err: any) {
+      alert(`Rejection failed: ${err.message}`)
+    } finally {
+      setIsDeciding(false)
     }
   }
 
@@ -79,19 +143,22 @@ export function QueryDetails() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
           <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
           <span className="badge badge-observed">Telemetry Inspector</span>
+          <span className="badge badge-ai-analysis">End-to-End Optimization Flow</span>
         </div>
         <h1 style={{ fontSize: '2.2rem', margin: 0 }}>Query Performance Details</h1>
         <p className="subtitle" style={{ fontSize: '0.95rem', color: '#64748b' }}>
-          Detailed telemetry, memory buffer hit ratios, and I/O distribution for a specific normalized query.
+          Detailed telemetry, memory buffer hit ratios, and autonomous before → analysis → optimization → after trace.
         </p>
       </div>
+
+      <OptimizationFlowHeader currentStage="analyze" />
 
       <form onSubmit={handleLookup} className="card filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
         <label style={{ fontSize: '12px', fontWeight: 600 }}>Query ID:</label>
         <input
           type="number"
           className="filter-input"
-          style={{ width: '160px' }}
+          style={{ width: '180px' }}
           value={queryIdInput}
           onChange={(e) => setQueryIdInput(e.target.value)}
           placeholder="e.g. 101"
@@ -141,7 +208,7 @@ export function QueryDetails() {
             </article>
           </div>
 
-          <article className="card section-card">
+          <article className="card section-card" style={{ marginBottom: '20px' }}>
             <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div>
                 <h2 style={{ margin: 0 }}>Normalized Query Statement (Privacy Preserved)</h2>
@@ -161,14 +228,39 @@ export function QueryDetails() {
               <Link to={`/gnn?queryId=${detail.query_id}`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
                 Run GNN Bottleneck Analysis →
               </Link>
-              <Link to={`/recommendations?queryId=${detail.query_id}`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
-                Find Recommendations →
-              </Link>
-              <Link to={`/assistant`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
-                Ask DBA Assistant →
+              <Link to={`/recommendations`} className="secondary-button" style={{ textDecoration: 'none', fontSize: '13px', padding: '8px 14px' }}>
+                View All Recommendations →
               </Link>
             </div>
           </article>
+
+          {/* Full Reusable Optimization Trace for this query */}
+          <OptimizationTrace
+            title={`Autonomous Optimization Trace: Query #${detail.query_id}`}
+            query={detail}
+            recommendation={
+              traceData?.matching_recommendations && traceData.matching_recommendations.length > 0
+                ? traceData.matching_recommendations[0]
+                : null
+            }
+            simulation={traceData?.latest_simulation}
+            auditInfo={
+              traceData?.audit_events && traceData.audit_events.length > 0
+                ? {
+                    action: traceData.audit_events[0].action,
+                    status: traceData.audit_events[0].new_status,
+                    reason: traceData.audit_events[0].reason,
+                    timestamp: traceData.audit_events[0].created_at ?? undefined,
+                  }
+                : null
+            }
+            onSimulate={handleSimulate}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            isSimulating={isSimulating}
+            isDeciding={isDeciding}
+            initialExpanded={true}
+          />
         </>
       )}
     </section>

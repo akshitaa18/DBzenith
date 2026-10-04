@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getRecommendations, Recommendation, approveRecommendation, rejectRecommendation } from '../lib/api'
+import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { OptimizationTrace } from '../components/OptimizationTrace'
 
 export function ApprovalCenterPage() {
   const [pendingRecs, setPendingRecs] = useState<Recommendation[]>([])
@@ -8,6 +10,7 @@ export function ApprovalCenterPage() {
   const [processingId, setProcessingId] = useState<number | null>(null)
   const [actionReason, setActionReason] = useState<{ [id: number]: string }>({})
   const [feedbackMsg, setFeedbackMsg] = useState<{ id: number; text: string; success: boolean } | null>(null)
+  const [expandedTraceId, setExpandedTraceId] = useState<number | null>(null)
 
   const loadPending = async () => {
     setLoading(true)
@@ -60,6 +63,12 @@ export function ApprovalCenterPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Visual Workflow Header */}
+      <OptimizationFlowHeader
+        currentStage="approve"
+        subtitle="Mandatory human sign-off gateway: Review candidate recommendations, empirical sandbox evidence, and regression checks before schema changes are executed."
+      />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -166,8 +175,17 @@ export function ApprovalCenterPage() {
                     <span className="badge badge-warning">AWAITING DBA DECISION</span>
                   </div>
 
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                    Created: {new Date(rec.created_at).toLocaleString()}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                      onClick={() => setExpandedTraceId(expandedTraceId === rec.id ? null : rec.id)}
+                    >
+                      {expandedTraceId === rec.id ? 'Hide Trace' : '🔍 Inspect Full Trace'}
+                    </button>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                      Created: {new Date(rec.created_at).toLocaleString()}
+                    </div>
                   </div>
                 </div>
 
@@ -264,6 +282,20 @@ export function ApprovalCenterPage() {
                     </button>
                   </div>
                 </div>
+
+                {/* Expandable Optimization Trace */}
+                {expandedTraceId === rec.id && (
+                  <div style={{ marginTop: '12px', paddingTop: '16px', borderTop: '1px dashed #334155' }}>
+                    <OptimizationTrace
+                      title={`Human Sign-Off Optimization Trace: Recommendation #${rec.id}`}
+                      recommendation={rec}
+                      onApprove={(id) => handleApprove(id)}
+                      onReject={(id) => handleReject(id)}
+                      isDeciding={processingId === rec.id}
+                      initialExpanded={true}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}
