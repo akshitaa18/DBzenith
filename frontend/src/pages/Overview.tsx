@@ -9,6 +9,8 @@ import {
   createSimulation,
   approveRecommendation,
   rejectRecommendation,
+  seedDemoWorkload,
+  collectTelemetry,
   type WorkloadSummary,
   type Recommendation,
   type RecommendationTrace,
@@ -103,24 +105,88 @@ export function Overview() {
     }
   }
 
-  if (loading) {
+  const [seedingDemo, setSeedingDemo] = useState(false)
+  const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null)
+
+  const handleSeedDemo = async () => {
+    setSeedingDemo(true)
+    setSeedSuccessMsg(null)
+    setError(null)
+    try {
+      const res = await seedDemoWorkload()
+      setSeedSuccessMsg(`Successfully generated demo workload! Snapshot #${res.snapshot_id} captured with ${res.total_calls.toLocaleString()} calls and ${res.recommendations_count} optimizations synthesized.`)
+      loadData()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to seed demo workload')
+    } finally {
+      setSeedingDemo(false)
+    }
+  }
+
+  const handleCollectTelemetry = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      await collectTelemetry()
+      loadData()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to collect telemetry')
+      setLoading(false)
+    }
+  }
+
+  if (loading && !summary) {
     return <div className="loading-box">Loading PostgreSQL workload telemetry from pg_stat_statements...</div>
   }
 
   return (
     <section>
-      <div className="hero" style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-          <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
-          <span className="status online">API: {health?.status ?? 'online'}</span>
-          <span className="badge badge-ai-analysis">GNN & RL ENGINE ACTIVE</span>
+      <div className="hero" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
+            <span className="status online">API: {health?.status ?? 'online'}</span>
+            <span className="badge badge-ai-analysis">GNN & RL ENGINE ACTIVE</span>
+          </div>
+          <h1 style={{ fontSize: '2.4rem', margin: '4px 0 10px 0' }}>Workload Telemetry Overview</h1>
+          <p className="subtitle" style={{ fontSize: '1rem', color: '#64748b', maxWidth: '800px' }}>
+            Live telemetry captured through DBZenith's privacy-preserving telemetry gateway. Metrics are
+            derived directly from PostgreSQL statistics and catalog tables.
+          </p>
         </div>
-        <h1 style={{ fontSize: '2.4rem', margin: '4px 0 10px 0' }}>Workload Telemetry Overview</h1>
-        <p className="subtitle" style={{ fontSize: '1rem', color: '#64748b', maxWidth: '800px' }}>
-          Live telemetry captured through DBZenith's privacy-preserving telemetry gateway. Metrics are
-          derived directly from PostgreSQL statistics and catalog tables.
-        </p>
+
+        {/* Global Demo & Refresh Controls */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '8px 16px', fontWeight: 600, fontSize: '13px' }}
+            disabled={seedingDemo}
+            onClick={handleSeedDemo}
+          >
+            {seedingDemo ? 'Generating Workload...' : '🚀 Load Demo Workload'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '8px 14px', fontSize: '13px' }}
+            onClick={handleCollectTelemetry}
+          >
+            🔄 Capture Snapshot
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '8px 14px', fontSize: '13px' }}
+            onClick={loadData}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {seedSuccessMsg && (
+        <div className="card" style={{ borderLeft: '4px solid #10b981', background: 'rgba(16, 185, 129, 0.08)', color: '#6ee7b7', padding: '12px 16px', marginBottom: '14px' }}>
+          <strong>✓ Workload Ready:</strong> {seedSuccessMsg}
+        </div>
+      )}
 
       {error && <div className="alert">{error}</div>}
 

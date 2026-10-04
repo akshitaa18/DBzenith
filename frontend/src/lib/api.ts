@@ -234,6 +234,31 @@ export function getAssistantTools(): Promise<Array<{ name: string; description: 
   return request('/api/v1/assistant/tools')
 }
 
+export function getRlStatus(): Promise<{
+  status: string
+  trained_agent_available: boolean
+  metadata: Record<string, unknown>
+  actions_supported: string[]
+  safety_invariant: string
+}> {
+  return request('/api/v1/rl/status')
+}
+
+export function optimizeWithRl(state?: Record<string, unknown>): Promise<{
+  action_id: number
+  action_type: string
+  action_params: Record<string, unknown>
+  predicted_reward: number
+  confidence: number
+  explanation: string
+  policy_version: string
+  model_type: string
+  safety_constraints_passed: boolean
+  simulated_cost_reduction_pct: number
+}> {
+  return request('/api/v1/rl/optimize', jsonBody(state || {}))
+}
+
 export function getReadiness(): Promise<{ status: string; database: string }> {
   return request('/api/v1/ready')
 }
@@ -332,4 +357,25 @@ export type RecommendationTrace = {
 
 export function getRecommendationTrace(recommendationId: number): Promise<RecommendationTrace> {
   return request(`/api/v1/recommendations/${recommendationId}/trace`)
+}
+
+export function seedDemoWorkload(): Promise<{
+  status: string
+  message: string
+  snapshot_id: number
+  total_calls: number
+  slow_queries: number
+  recommendations_count: number
+}> {
+  return request('/api/v1/workload/seed-demo', { method: 'POST' })
+}
+
+export function collectTelemetry(): Promise<{
+  status: string
+  snapshot_id: number
+  total_calls: number
+  slow_queries: number
+  recommendations_generated: number
+}> {
+  return request('/api/v1/workload/collect', { method: 'POST' })
 }

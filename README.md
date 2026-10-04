@@ -55,12 +55,9 @@ DBZenith is an enterprise-grade autonomous PostgreSQL performance optimization p
 
 ## Quickstart: Running from a Clean Machine
 
-### Prerequisites
-- Docker Engine 24+ & Docker Compose v2+
-- Python 3.11+ (Python 3.12 / 3.14 compatible)
-- Node.js 20+ & npm
+### Option A: Complete Docker Compose Stack (Recommended - Zero Setup)
 
-### Exact Commands
+Run everything (PostgreSQL, Sandbox with HypoPG, FastAPI Backend, and Nginx Frontend) with one command:
 
 ```bash
 # 1. Clone the repository
@@ -70,24 +67,35 @@ cd DBzenith
 # 2. Configure Environment Variables
 cp .env.example .env
 
-# 3. Start PostgreSQL Containers (Production & Sandbox with HypoPG)
+# 3. Start the entire platform via Docker Compose
+docker compose up -d
+
+# 4. Open the Web Dashboard
+# Visit http://localhost:8080 in your browser.
+# Click "🚀 Load Demo Workload" on the Overview page to generate real e-commerce traffic,
+# capture telemetry, and synthesize optimization recommendations automatically!
+```
+
+### Option B: Local Development / Manual Startup
+
+```bash
+# 1. Start PostgreSQL Databases
 docker compose up -d db sandbox-db
 
-# 4. Initialize Database Schemas & Seed Dataset
+# 2. Initialize Database Schemas & Seed Dataset
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 python scripts/setup_ecommerce_db.py
 
-# 5. Launch Backend Server (Port 8000)
+# 3. Launch Backend Server (Port 8000)
 cd backend
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# (In a separate terminal)
 
-# 6. Launch Frontend Dashboard (Port 5173 / 5174)
-cd frontend
+# 4. Launch Frontend Dashboard (Port 8080 or Port 5173 for Vite dev)
+cd ../frontend
 npm install
 npm run dev
 
-# 7. Execute Complete 20-Step End-to-End Scenario
+# 5. Execute Complete 20-Step End-to-End Synthetic Scenario
 python scripts/run_e2e_scenario.py
 ```
 

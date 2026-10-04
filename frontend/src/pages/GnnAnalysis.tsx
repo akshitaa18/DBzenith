@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { analyzePlan, PlanAnalysis } from '../lib/api'
+import { analyzePlan, getRlStatus, optimizeWithRl, PlanAnalysis } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
 
@@ -37,7 +37,12 @@ export function GnnAnalysisPage() {
   const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'bottlenecks' | 'graph' | 'features'>('bottlenecks')
+  const [activeTab, setActiveTab] = useState<'bottlenecks' | 'graph' | 'features' | 'rl'>('bottlenecks')
+
+  // RL Engine State
+  const [rlResult, setRlResult] = useState<any | null>(null)
+  const [rlLoading, setRlLoading] = useState(false)
+  const [rlStatusData, setRlStatusData] = useState<any | null>(null)
 
   const handleRunAnalysis = async (queryToRun?: string) => {
     const targetSql = queryToRun ?? sql
@@ -199,6 +204,20 @@ export function GnnAnalysisPage() {
               onClick={() => setActiveTab('features')}
             >
               Extracted Feature Vector ({Object.keys(analysis.features || {}).length})
+            </button>
+            <button
+              className={`subnav-tab ${activeTab === 'rl' ? 'active' : ''}`}
+              onClick={async () => {
+                setActiveTab('rl')
+                if (!rlStatusData) {
+                  try {
+                    const st = await getRlStatus()
+                    setRlStatusData(st)
+                  } catch (e) {}
+                }
+              }}
+            >
+              RL Optimization Policy 🤖
             </button>
           </div>
 
@@ -365,6 +384,108 @@ export function GnnAnalysisPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Tab 4: RL Policy Optimization */}
+          {activeTab === 'rl' && (
+            <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f8fafc' }}>
+                    Reinforcement Learning Optimization Engine (PPO / DQN Policy)
+                  </h3>
+                  <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.8rem' }}>
+                    Agent formulates discrete optimization actions (Index, Rewrite, Partition, Join) based on GNN plan state representations.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ fontSize: '13px', padding: '6px 14px' }}
+                  disabled={rlLoading}
+                  onClick={async () => {
+                    setRlLoading(true)
+                    try {
+                      const res = await optimizeWithRl({
+                        workload_metrics: {
+                          total_cost: analysis.features?.total_cost || 100,
+                          seq_scan_fraction: analysis.features?.seq_scan_fraction || 0.4,
+                        },
+                      })
+                      setRlResult(res)
+                    } catch (e: any) {
+                      alert('RL optimization failed: ' + e.message)
+                    } finally {
+                      setRlLoading(false)
+                    }
+                  }}
+                >
+                  {rlLoading ? 'Evaluating RL Policy...' : 'Run RL Policy Action 🚀'}
+                </button>
+              </div>
+
+              {/* Invariant badge */}
+              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px 14px', fontSize: '0.8rem', color: '#38bdf8' }}>
+                🛡️ <strong>RL Safety Boundary:</strong> State representation &rarr; Candidate actions &rarr; Policy selection &rarr; Sandbox validation &rarr; Human sign-off. The RL model is strictly isolated from production catalogs.
+              </div>
+
+              {/* Status and Action space */}
+              {rlStatusData && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                  <div style={{ background: '#090d16', padding: '10px', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Agent Readiness:</div>
+                    <div style={{ fontWeight: 600, color: '#10b981', marginTop: '2px' }}>
+                      {rlStatusData.status.toUpperCase()} ({rlStatusData.trained_agent_available ? 'Pretrained weights loaded' : 'Rule-guided fallback active'})
+                    </div>
+                  </div>
+                  <div style={{ background: '#090d16', padding: '10px', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Supported Action Space:</div>
+                    <div style={{ fontSize: '0.8rem', color: '#e2e8f0', marginTop: '2px' }}>
+                      {rlStatusData.actions_supported?.join(', ')}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* RL Execution Result */}
+              {rlResult && (
+                <div style={{ marginTop: '10px', background: '#0d1527', border: '1px solid #2563eb', borderRadius: '6px', padding: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="badge badge-ai-analysis">SELECTED ACTION</span>
+                      <strong style={{ color: '#38bdf8', fontSize: '1rem' }}>
+                        {rlResult.action_type}
+                      </strong>
+                    </div>
+                    <span className="badge badge-success">
+                      Predicted Reward: +{rlResult.predicted_reward?.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                    {rlResult.explanation}
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '0.8rem' }}>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>Policy Version: </span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{rlResult.policy_version}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>Model Architecture: </span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{rlResult.model_type}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>Confidence: </span>
+                      <span style={{ color: '#38bdf8', fontWeight: 600 }}>{Math.round((rlResult.confidence || 0) * 100)}%</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>Simulated Cost Reduction: </span>
+                      <span style={{ color: '#10b981', fontWeight: 700 }}>{rlResult.simulated_cost_reduction_pct?.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

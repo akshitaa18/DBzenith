@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { analyzePlan, type PlanAnalysis } from '../lib/api'
+import { analyzePlan, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
@@ -14,6 +14,11 @@ export function PlanViewer() {
   const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // SQL AST Rewriter State
+  const [rewriteResult, setRewriteResult] = useState<SQLRewriteResponse | null>(null)
+  const [rewriting, setRewriting] = useState(false)
+  const [rewriteError, setRewriteError] = useState<string | null>(null)
 
   const handleAnalyze = async () => {
     setLoading(true)
@@ -32,6 +37,25 @@ export function PlanViewer() {
     handleAnalyze()
   }, [])
 
+  const handleRewrite = async () => {
+    setRewriting(true)
+    setRewriteError(null)
+    setRewriteResult(null)
+    try {
+      const res = await rewriteSql(sql, true)
+      setRewriteResult(res)
+    } catch (err: any) {
+      setRewriteError(err.message || 'SQL rewrite analysis failed.')
+    } finally {
+      setRewriting(false)
+    }
+  }
+
+  const handleApplyRewritten = (newSql: string) => {
+    setSql(newSql)
+    handleAnalyze()
+  }
+
   return (
     <section>
       <div className="section-head" style={{ marginBottom: '18px' }}>
@@ -40,9 +64,9 @@ export function PlanViewer() {
           <span className="badge badge-ai-analysis">AI ANALYSIS: AST & Node Parser</span>
           <span className="badge badge-recommendation">Optimization Ready</span>
         </div>
-        <h1 style={{ fontSize: '2.2rem', margin: 0 }}>Execution Plan Viewer</h1>
+        <h1 style={{ fontSize: '2.2rem', margin: 0 }}>Execution Plan Viewer & SQL Rewriter</h1>
         <p className="subtitle" style={{ fontSize: '0.95rem', color: '#64748b' }}>
-          Interactive planner cost evaluation. Explains queries safely and maps plan bottlenecks to DBZenith optimizations.
+          Interactive planner cost evaluation. Explains queries safely, transforms SQL ASTs, and maps plan bottlenecks to DBZenith optimizations.
         </p>
       </div>
 
@@ -59,17 +83,91 @@ export function PlanViewer() {
           rows={3}
           placeholder="Enter SELECT query to explain..."
         />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button
-            className="primary-button"
-            onClick={handleAnalyze}
-            disabled={loading || !sql.trim()}
-          >
-            {loading ? 'Evaluating EXPLAIN Plan...' : 'Explain & Visualize Plan'}
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              className="primary-button"
+              onClick={handleAnalyze}
+              disabled={loading || !sql.trim()}
+            >
+              {loading ? 'Evaluating EXPLAIN Plan...' : 'Explain & Visualize Plan'}
+            </button>
+            <button
+              className="secondary-button"
+              onClick={handleRewrite}
+              disabled={rewriting || !sql.trim()}
+            >
+              {rewriting ? 'Analyzing AST...' : '⚡ AST Query Rewriter'}
+            </button>
+          </div>
           <small className="muted">Read-only constraint enforced: DDL/DML statements are rejected.</small>
         </div>
       </article>
+
+      {rewriteError && <div className="alert" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5' }}>{rewriteError}</div>}
+
+      {/* SQL AST Rewriter Output & Diff */}
+      {rewriteResult && (
+        <article className="card section-card" style={{ marginBottom: '20px', borderLeft: '4px solid #38bdf8' }}>
+          <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge badge-recommendation">AST REWRITER RESULT</span>
+                <span className={`badge ${rewriteResult.safety_verdict === 'safe' ? 'badge-success' : 'badge-warning'}`}>
+                  {rewriteResult.safety_verdict.toUpperCase()}
+                </span>
+                <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1' }}>
+                  Transformation: {rewriteResult.transformation}
+                </span>
+              </div>
+              <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+                {rewriteResult.reason}
+              </p>
+            </div>
+            {rewriteResult.rewritten_query && (
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+                onClick={() => handleApplyRewritten(rewriteResult.rewritten_query!)}
+              >
+                Apply Rewritten SQL & Re-Explain →
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+            <div style={{ background: '#090d16', padding: '10px 14px', borderRadius: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Cost Improvement:</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: (rewriteResult.cost_improvement_pct ?? 0) > 0 ? '#10b981' : '#f8fafc' }}>
+                {rewriteResult.cost_improvement_pct != null ? `${rewriteResult.cost_improvement_pct.toFixed(1)}%` : 'Evaluated'}
+              </div>
+            </div>
+            <div style={{ background: '#090d16', padding: '10px 14px', borderRadius: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Semantic Equivalence:</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: rewriteResult.semantic_match ? '#10b981' : '#f59e0b' }}>
+                {rewriteResult.semantic_match ? 'Verified ✓' : 'Conservative'}
+              </div>
+            </div>
+            <div style={{ background: '#090d16', padding: '10px 14px', borderRadius: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Sandbox Validation:</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#38bdf8' }}>
+                {rewriteResult.validation_status.toUpperCase()}
+              </div>
+            </div>
+          </div>
+
+          {rewriteResult.rewritten_query && (
+            <div>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                Rewritten Query Statement:
+              </div>
+              <pre className="sql-box" style={{ background: '#090d16', color: '#a78bfa', borderColor: '#334155' }}>
+                {rewriteResult.rewritten_query}
+              </pre>
+            </div>
+          )}
+        </article>
+      )}
 
       {error && <div className="alert">{error}</div>}
 

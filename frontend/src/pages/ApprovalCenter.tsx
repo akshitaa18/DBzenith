@@ -33,6 +33,11 @@ export function ApprovalCenterPage() {
 
   const handleApprove = async (id: number) => {
     const reason = actionReason[id]?.trim() || 'Approved by DBA after safety validation'
+    const confirmed = window.confirm(
+      `CRITICAL CONFIRMATION:\n\nAre you sure you want to approve Recommendation #${id}?\n\nThis will validate the migration queue and log an immutable audit event under your operator ID.`
+    )
+    if (!confirmed) return
+
     setProcessingId(id)
     setFeedbackMsg(null)
     try {
@@ -48,6 +53,11 @@ export function ApprovalCenterPage() {
 
   const handleReject = async (id: number) => {
     const reason = actionReason[id]?.trim() || 'Rejected by DBA operator'
+    const confirmed = window.confirm(
+      `CONFIRMATION:\n\nAre you sure you want to reject Recommendation #${id}?\n\nStatus will be permanently marked as rejected in the audit trail.`
+    )
+    if (!confirmed) return
+
     setProcessingId(id)
     setFeedbackMsg(null)
     try {
