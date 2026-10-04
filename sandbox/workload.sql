@@ -22,7 +22,7 @@ SELECT
     now() - ((g % 365) || ' days')::interval,
     repeat('order-payload-', (g % 4) + 1)
 FROM generate_series(1, 10000) AS g
-ON CONFLICT DO NOTHING;
+WHERE NOT EXISTS (SELECT 1 FROM telemetry_demo_orders LIMIT 1);
 
 ANALYZE telemetry_demo_orders;
 

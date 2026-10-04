@@ -3,16 +3,30 @@ import { analyzePlan, PlanAnalysis } from '../lib/api'
 
 const SAMPLE_QUERIES = [
   {
-    name: 'Order Items Join Aggregate (Slow)',
-    sql: `SELECT o.customer_id, count(oi.id) as item_count, sum(oi.subtotal) as total_val\nFROM orders o\nJOIN order_items oi ON o.id = oi.order_id\nWHERE o.order_status = 'pending'\nGROUP BY o.customer_id;`,
+    name: 'Pending orders by customer',
+    sql: `SELECT customer_id, count(*) AS order_count, sum(amount) AS total_val
+FROM telemetry_demo_orders
+WHERE status = 'pending'
+GROUP BY customer_id
+ORDER BY total_val DESC
+LIMIT 50;`,
   },
   {
-    name: 'Customer Filter without Index',
-    sql: `SELECT id, first_name, last_name, email FROM customers WHERE email LIKE '%@example.com' AND city = 'Seattle';`,
+    name: 'Status filter on demo orders',
+    sql: `SELECT id, customer_id, amount, created_at
+FROM telemetry_demo_orders
+WHERE status = 'completed'
+ORDER BY created_at DESC
+LIMIT 100;`,
   },
   {
-    name: 'Inventory Restock Cross Join Scan',
-    sql: `SELECT p.title, p.sku, oi.price\nFROM products p\nJOIN order_items oi ON oi.sku = p.sku\nWHERE p.is_active = true\nORDER BY oi.subtotal DESC\nLIMIT 20;`,
+    name: 'Self-join scan (high cost)',
+    sql: `SELECT a.customer_id, count(*) AS pair_count
+FROM telemetry_demo_orders a
+JOIN telemetry_demo_orders b ON b.customer_id = a.customer_id
+WHERE a.amount > 700.00
+GROUP BY a.customer_id
+LIMIT 20;`,
   },
 ]
 

@@ -1,9 +1,35 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`)
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`)
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${API_BASE_URL}${path}`
+  let response: Response
+  try {
+    response = await fetch(url, init)
+  } catch {
+    const origin = API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')
+    throw new Error(
+      `Cannot reach the DBZenith API at ${origin || url}. Start the backend (port 8000) or run docker compose up.`,
+    )
+  }
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const body = await response.json()
+      detail = typeof body?.detail === 'string' ? `: ${body.detail}` : ''
+    } catch {
+      detail = ''
+    }
+    throw new Error(`API request failed: ${response.status}${detail}`)
+  }
   return response.json()
+}
+
+function jsonBody(payload: unknown): RequestInit {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }
 }
 
 export function getHealth(): Promise<{ status: string; service: string; version: string }> {
@@ -75,7 +101,6 @@ export function getWorkloadSummary(): Promise<WorkloadSummary> {
   return request('/api/v1/workload/summary')
 }
 
-
 export type PlanAnalysis = {
   id: number
   created_at: string
@@ -88,14 +113,8 @@ export type PlanAnalysis = {
   explanation: { summary: string; feature_highlights: Record<string, number>; method: string; gnn?: any }
 }
 
-export async function analyzePlan(sql: string): Promise<PlanAnalysis> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/plans/analyze`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql }),
-  })
-  if (!response.ok) throw new Error(`Plan analysis failed: ${response.status}`)
-  return response.json()
+export function analyzePlan(sql: string): Promise<PlanAnalysis> {
+  return request('/api/v1/plans/analyze', jsonBody({ sql }))
 }
 
 export function getPlanAnalysis(id: number): Promise<PlanAnalysis> {
@@ -132,14 +151,8 @@ export function getRecommendations(page = 1, pageSize = 20, status?: string): Pr
   return request(`/api/v1/recommendations?${params}`)
 }
 
-async function decideRecommendation(id: number, action: 'approve' | 'reject', reason = 'operator decision'): Promise<Recommendation> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/recommendations/${id}/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason }),
-  })
-  if (!response.ok) throw new Error(`Recommendation ${action} failed: ${response.status}`)
-  return response.json()
+function decideRecommendation(id: number, action: 'approve' | 'reject', reason = 'operator decision'): Promise<Recommendation> {
+  return request(`/api/v1/recommendations/${id}/${action}`, jsonBody({ reason }))
 }
 
 export function approveRecommendation(id: number, reason?: string): Promise<Recommendation> {
@@ -149,7 +162,6 @@ export function approveRecommendation(id: number, reason?: string): Promise<Reco
 export function rejectRecommendation(id: number, reason?: string): Promise<Recommendation> {
   return decideRecommendation(id, 'reject', reason)
 }
-
 
 export type Simulation = {
   id: number
@@ -171,14 +183,8 @@ export type Simulation = {
   error: string | null
 }
 
-export async function createSimulation(recommendationId: number, benchmarkRuns = 3): Promise<Simulation> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/simulations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recommendation_id: recommendationId, benchmark_runs: benchmarkRuns }),
-  })
-  if (!response.ok) throw new Error(`Simulation failed: ${response.status}`)
-  return response.json()
+export function createSimulation(recommendationId: number, benchmarkRuns = 3): Promise<Simulation> {
+  return request('/api/v1/simulations', jsonBody({ recommendation_id: recommendationId, benchmark_runs: benchmarkRuns }))
 }
 
 export function listSimulations(limit = 50): Promise<Simulation[]> {
@@ -216,18 +222,12 @@ export type AssistantChatResponse = {
   }>
 }
 
-export async function sendAssistantMessage(
+export function sendAssistantMessage(
   message: string,
   sessionId?: string,
   role = 'dba'
 ): Promise<AssistantChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/assistant/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId, role }),
-  })
-  if (!response.ok) throw new Error(`Assistant chat failed: ${response.status}`)
-  return response.json()
+  return request('/api/v1/assistant/chat', jsonBody({ message, session_id: sessionId, role }))
 }
 
 export function getAssistantTools(): Promise<Array<{ name: string; description: string }>> {
@@ -238,8 +238,10 @@ export function getReadiness(): Promise<{ status: string; database: string }> {
   return request('/api/v1/ready')
 }
 
-export function getWorkloadSnapshots(limit = 10): Promise<Array<Record<string, unknown>>> {
-  return request(`/api/v1/workload/snapshots?limit=${limit}`)
+export async function getWorkloadSnapshots(limit = 10): Promise<Record<string, unknown>[]> {
+  const data = await request<Record<string, unknown>>(`/api/v1/workload/summary`)
+  void limit
+  return [data]
 }
 
 export function getAssistantAuditLogs(): Promise<Array<{
@@ -284,14 +286,6 @@ export type SQLRewriteResponse = {
   production_modified: boolean
 }
 
-export async function rewriteSql(sql: string, validateSandbox = true): Promise<SQLRewriteResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/rewriter/rewrite`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, validate_sandbox: validateSandbox }),
-  })
-  if (!response.ok) throw new Error(`SQL rewrite failed: ${response.status}`)
-  return response.json()
+export function rewriteSql(sql: string, validateSandbox = true): Promise<SQLRewriteResponse> {
+  return request('/api/v1/rewriter/rewrite', jsonBody({ sql, validate_sandbox: validateSandbox }))
 }
-
-

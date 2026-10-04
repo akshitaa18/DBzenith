@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { getQueryDetail, type QueryDetail } from '../lib/api'
+import { getQueryDetail, getSlowQueries, type QueryDetail } from '../lib/api'
 
 function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
@@ -8,8 +8,7 @@ function formatMs(value: number) {
 
 export function QueryDetails() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialQueryId = searchParams.get('id') || '1'
-  const [queryIdInput, setQueryIdInput] = useState(initialQueryId)
+  const [queryIdInput, setQueryIdInput] = useState('')
   const [detail, setDetail] = useState<QueryDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,13 +29,26 @@ export function QueryDetails() {
   }
 
   useEffect(() => {
-    const idNum = Number(searchParams.get('id'))
-    if (idNum) {
-      setQueryIdInput(String(idNum))
-      loadQuery(idNum)
-    } else {
-      loadQuery(Number(initialQueryId))
+    const idParam = searchParams.get('id')
+    if (idParam) {
+      const idNum = Number(idParam)
+      if (idNum) {
+        setQueryIdInput(String(idNum))
+        loadQuery(idNum)
+        return
+      }
     }
+    setLoading(true)
+    getSlowQueries(1, 1)
+      .then((data) => {
+        if (data.items && data.items.length > 0) {
+          const top = data.items[0]
+          setQueryIdInput(String(top.id || top.query_id))
+          setDetail(top)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [searchParams])
 
   const handleLookup = (e: React.FormEvent) => {

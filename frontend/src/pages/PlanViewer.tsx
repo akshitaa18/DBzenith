@@ -5,7 +5,7 @@ import { PlanVisualization } from '../components/PlanVisualization'
 
 export function PlanViewer() {
   const [searchParams] = useSearchParams()
-  const [sql, setSql] = useState('SELECT order_id, customer_id, total_amount FROM telemetry_demo_orders WHERE status = \'shipped\' ORDER BY created_at DESC LIMIT 50')
+  const [sql, setSql] = useState("SELECT id, customer_id, amount FROM telemetry_demo_orders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50")
   const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
