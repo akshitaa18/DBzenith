@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { analyzePlan, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
+import { analyzePlan, getQueryDetail, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
@@ -20,11 +20,12 @@ export function PlanViewer() {
   const [rewriting, setRewriting] = useState(false)
   const [rewriteError, setRewriteError] = useState<string | null>(null)
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (queryOverride?: unknown) => {
+    const targetSql = typeof queryOverride === 'string' ? queryOverride : sql
     setLoading(true)
     setError(null)
     try {
-      const res = await analyzePlan(sql)
+      const res = await analyzePlan(targetSql.replace(/;\s*$/, ''))
       setAnalysis(res)
     } catch (err: any) {
       setError(err.message || 'Plan analysis failed. Only read-only SELECT / WITH queries are supported.')
@@ -34,8 +35,28 @@ export function PlanViewer() {
   }
 
   useEffect(() => {
-    handleAnalyze()
-  }, [])
+    const qid = searchParams.get('queryId')
+    const sqlParam = searchParams.get('sql')
+    if (qid) {
+      getQueryDetail(qid)
+        .then((q) => {
+          if (q.normalized_query) {
+            const clean = q.normalized_query.replace(/;\s*$/, '')
+            setSql(clean)
+            handleAnalyze(clean)
+          }
+        })
+        .catch(() => {
+          handleAnalyze()
+        })
+    } else if (sqlParam) {
+      const clean = sqlParam.replace(/;\s*$/, '')
+      setSql(clean)
+      handleAnalyze(clean)
+    } else {
+      handleAnalyze()
+    }
+  }, [searchParams])
 
   const handleRewrite = async () => {
     setRewriting(true)

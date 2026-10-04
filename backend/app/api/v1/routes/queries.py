@@ -18,6 +18,7 @@ def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 
         select(QueryStatistic)
         .join(latest, QueryStatistic.id == latest.c.max_id)
         .where(
+            (QueryStatistic.normalized_query.ilike("SELECT %") | QueryStatistic.normalized_query.ilike("WITH %")),
             ~QueryStatistic.normalized_query.ilike("%workload_snapshots%"),
             ~QueryStatistic.normalized_query.ilike("%query_statistics%"),
             ~QueryStatistic.normalized_query.ilike("%relation_statistics%"),
@@ -25,9 +26,17 @@ def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 
             ~QueryStatistic.normalized_query.ilike("%optimization_recommendations%"),
             ~QueryStatistic.normalized_query.ilike("%optimization_simulations%"),
             ~QueryStatistic.normalized_query.ilike("%recommendation_audit_events%"),
+            ~QueryStatistic.normalized_query.ilike("%security_audit_events%"),
+            ~QueryStatistic.normalized_query.ilike("%security_users%"),
             ~QueryStatistic.normalized_query.ilike("%audit_events%"),
             ~QueryStatistic.normalized_query.ilike("%pg_stat_statements%"),
             ~QueryStatistic.normalized_query.ilike("%pg_qualstats%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_stat_user_tables%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_class%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_index%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_indexes%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_database%"),
+            ~QueryStatistic.normalized_query.ilike("%pg_roles%"),
             ~QueryStatistic.normalized_query.ilike("%information_schema%"),
             ~QueryStatistic.normalized_query.ilike("%alembic_version%"),
             ~QueryStatistic.normalized_query.ilike("BEGIN%"),
@@ -36,6 +45,13 @@ def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 
             ~QueryStatistic.normalized_query.ilike("SAVEPOINT%"),
             ~QueryStatistic.normalized_query.ilike("RELEASE%"),
             ~QueryStatistic.normalized_query.ilike("DEALLOCATE%"),
+            ~QueryStatistic.normalized_query.ilike("SET %"),
+            ~QueryStatistic.normalized_query.ilike("EXPLAIN %"),
+            ~QueryStatistic.normalized_query.ilike("CREATE %"),
+            ~QueryStatistic.normalized_query.ilike("DROP %"),
+            ~QueryStatistic.normalized_query.ilike("ALTER %"),
+            ~QueryStatistic.normalized_query.ilike("ANALYZE %"),
+            ~QueryStatistic.normalized_query.ilike("VACUUM %"),
         )
         .order_by(desc(QueryStatistic.mean_exec_time_ms), desc(QueryStatistic.calls))
     )

@@ -6,7 +6,7 @@ import { OptimizationTrace } from '../components/OptimizationTrace'
 
 const SAMPLE_QUERIES = [
   {
-    name: 'Pending orders by customer',
+    name: 'Pending orders by customer (Agg + Sort)',
     sql: `SELECT customer_id, count(*) AS order_count, sum(amount) AS total_val
 FROM telemetry_demo_orders
 WHERE status = 'pending'
@@ -15,7 +15,7 @@ ORDER BY total_val DESC
 LIMIT 50`,
   },
   {
-    name: 'Status filter on demo orders',
+    name: 'Status filter scan on demo orders',
     sql: `SELECT id, customer_id, amount, created_at
 FROM telemetry_demo_orders
 WHERE status = 'completed'
@@ -23,13 +23,38 @@ ORDER BY created_at DESC
 LIMIT 100`,
   },
   {
-    name: 'Self-join scan (high cost)',
+    name: 'Star Join (Orders + Customers + Products + Regions)',
+    sql: `SELECT o.order_id, c.last_name, p.product_name, r.region_name, o.amount
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+JOIN products p ON p.product_id = o.product_id
+JOIN regions r ON r.region_id = o.region_id
+WHERE o.amount > 500.00
+ORDER BY o.amount DESC
+LIMIT 50`,
+  },
+  {
+    name: 'Self-join scan (high nested loop cost)',
     sql: `SELECT a.customer_id, count(*) AS pair_count
 FROM telemetry_demo_orders a
 JOIN telemetry_demo_orders b ON b.customer_id = a.customer_id
 WHERE a.amount > 700.00
 GROUP BY a.customer_id
 LIMIT 20`,
+  },
+  {
+    name: 'Time-series range scan (partition candidate)',
+    sql: `SELECT order_id, customer_id, amount, order_date
+FROM orders
+WHERE order_date >= '2024-01-01' AND order_date < '2024-07-01'
+ORDER BY order_date DESC
+LIMIT 100`,
+  },
+  {
+    name: 'Correlated EXISTS subquery',
+    sql: `SELECT c.customer_id, c.first_name, c.email
+FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id AND o.amount > 300.00)`,
   },
 ]
 
