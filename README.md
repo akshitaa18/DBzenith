@@ -1,169 +1,270 @@
-# DBZenith v0.7 — Privacy-Preserving Autonomous PostgreSQL DBA
+# DBZenith
 
-DBZenith is an enterprise-grade autonomous PostgreSQL performance optimization platform combining real telemetry, GNN surrogate cost modeling, reinforcement learning optimization policies, AST SQL rewriting, isolated HypoPG sandbox simulations, and a LangGraph conversational DBA assistant with strict human-in-the-loop approval invariants.
+### Privacy-Preserving Autonomous PostgreSQL Database Optimization
 
----
+DBZenith is an AI-assisted PostgreSQL performance optimization platform that analyzes database workloads, identifies query bottlenecks, recommends optimizations, and evaluates potential changes in an isolated sandbox. It combines workload telemetry, privacy-preserving SQL abstraction, Graph Neural Network (GNN) analysis, Reinforcement Learning (RL), SQL rewriting, HypoPG simulations, and a LangGraph-powered DBA assistant.
 
-## Architecture & System Overview
+**Core principle:** AI recommends, the sandbox validates, and authorized humans approve production changes.
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Technology Stack](#technology-stack)
+- [Getting Started](#getting-started)
+- [Accessing the Application](#accessing-the-application)
+- [How It Works](#how-it-works)
+- [Security Design](#security-design)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [Environment Configuration](#environment-configuration)
+- [Important Notes](#important-notes)
+
+
+## Features
+
+- **PostgreSQL workload monitoring** — collect query and relation statistics using PostgreSQL telemetry, including `pg_stat_statements`.
+- **Slow-query analysis** — inspect query performance and execution plans to identify possible bottlenecks.
+- **Privacy Gateway** — mask SQL literals, tokenize identifiers, sanitize execution-plan data, and generate structural metadata before AI analysis.
+- **GNN execution-plan analysis** — represent execution plans as graphs to help identify expensive operators and potential optimization opportunities.
+- **Reinforcement Learning** — evaluate candidate optimization actions using a reward model that considers performance benefits and operational costs.
+- **SQL AST rewriting** — generate candidate query rewrites and validate them before presenting recommendations.
+- **Isolated PostgreSQL sandbox** — use a separate PostgreSQL environment with HypoPG to evaluate hypothetical indexes without creating them on the production database.
+- **LangGraph DBA assistant** — interact with the optimization workflow through a conversational assistant with controlled tools.
+- **Human-in-the-loop approvals** — require authorized operator approval before production-impacting changes.
+- **Role-based access control (RBAC)** — separate permissions for viewers, analysts, DBAs, and administrators.
+- **Audit logging** — record important security, analysis, simulation, and approval events.
+- **Interactive dashboard** — review workload health, slow queries, execution plans, recommendations, simulations, approvals, and audit information.
+- **Docker Compose deployment** — run the application and its supporting services in a reproducible local environment.
+
+## Architecture
 
 ```text
-                               +--------------------------------------------+
-                               |     DBZenith React / TypeScript Shell      |
-                               |  (11 Core DBA Views: Overview, Slow Qs,    |
-                               |   Plan Viewer, GNN, Recs, Simulations,     |
-                               |   Approvals, Assistant, Health, Audit)     |
-                               +---------------------+----------------------+
-                                                     |  HTTP REST / API v1
-                                                     v
-                               +---------------------+----------------------+
-                               |       FastAPI Enterprise Gateway           |
-                               |  (Authentication, RBAC, Rate Limiting,     |
-                               |   Audit Ledger, Security Headers, CORS)    |
-                               +---------------------+----------------------+
-                                                     |
-             +-----------------------+---------------+-----------------------+
-             |                       |                                       |
-             v                       v                                       v
-    +-----------------+    +-------------------+                   +-------------------+
-    |    Telemetry    |    |  Privacy Gateway  |                   | Isolated Sandbox  |
-    |    Collector    |    | (AST Sanitizer,   |                   | (HypoPG Virtual   |
-    | (pg_stat_stmts, |    |  Literal Masking, |                   |  Indexes, Ephemer.|
-    |  system catalog |    |  Identifier Token |                   |  Replication,     |
-    |  sliding window)|    |  Structural Hash) |                   |  Regression Check)|
-    +--------+--------+    +---------+---------+                   +---------+---------+
-             |                       |                                       |
-             +-----------+-----------+                                       |
-                         |                                                   |
-                         v                                                   v
-           +-------------+-------------+                       +-------------+-------------+
-           |     AI Boundary Guard     |                       |    Human Approval Center  |
-           | (GNN Cost Model, RL Agent |                       |  (MANDATORY INVARIANT:    |
-           |  DQN Policy, LangGraph)   |                       |   No Production Mutation  |
-           | Raw data strictly BLOCKED |                       |   without DBA Sign-off)   |
-           +---------------------------+                       +---------------------------+
+                         React + TypeScript Dashboard
+                                      |
+                                      v
+                              FastAPI Backend
+                         Authentication / RBAC / API
+                                      |
+                  +-------------------+-------------------+
+                  |                   |                   |
+                  v                   v                   v
+          PostgreSQL Telemetry   Privacy Gateway    Sandbox PostgreSQL
+          Query/Relation Stats   Mask + Abstract     + HypoPG
+                  |                   |                   |
+                  |                   v                   |
+                  |             Sanitized Data             |
+                  |                   |                   |
+                  |          +--------+--------+           |
+                  |          |        |        |           |
+                  |          v        v        v           |
+                  |         GNN       RL    LangGraph       |
+                  |          |        |        |           |
+                  +----------+--------+--------+-----------+
+                                      |
+                                      v
+                           Recommendations / Simulation
+                                      |
+                                      v
+                              Human Approval
+                                      |
+                                      v
+                           Auditing and Traceability
 ```
 
----
+## Technology Stack
 
-## 3 Core Operational Invariants
+| Layer | Technologies |
+|---|---|
+| Frontend | React, TypeScript, Vite |
+| Backend API | Python, FastAPI, SQLAlchemy, Pydantic |
+| Database | PostgreSQL 17, `pg_stat_statements` |
+| Sandbox | PostgreSQL, HypoPG |
+| AI and optimization | PyTorch, PyTorch Geometric, Gymnasium, DQN, LangGraph |
+| Database migrations | Alembic |
+| Deployment | Docker, Docker Compose, Nginx |
+| Frontend testing | Vitest |
+| Backend testing | Pytest |
 
-1. **RAW DATA NEVER ENTERS THE AI BOUNDARY**: All queries and plans flow through the Privacy Gateway. Literals, client constants, passwords, API tokens, and connection strings are masked; identifiers are replaced with deterministic cryptographic hashes.
-2. **AI NEVER DIRECTLY MODIFIES PRODUCTION**: The RL agent, AST rewriter, GNN engine, and LangGraph assistant operate exclusively with read permissions and sandbox simulations. Direct production mutation code paths do not exist.
-3. **PRODUCTION CHANGES REQUIRE HUMAN APPROVAL**: Every candidate index, query rewrite, or partition action defaults to `requires_approval = True`. Only authenticated operators with `DBA` or `ADMIN` roles can authorize migrations.
+## Getting Started
 
----
+### Prerequisites
 
-## Quickstart: Running from a Clean Machine
+For the Docker-based setup, install:
 
-### Option A: Complete Docker Compose Stack (Recommended - Zero Setup)
+- [Git](https://git-scm.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with the Docker Compose plugin
 
-Run everything (PostgreSQL, Sandbox with HypoPG, FastAPI Backend, and Nginx Frontend) with one command:
+For manual development, you will also need Python 3.12 and Node.js/npm.
+
+### 1. Clone the repository
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/akshitaa18/DBzenith.git
 cd DBzenith
+```
 
-# 2. Configure Environment Variables
+### 2. Configure environment variables
+
+Create a local environment file from the example:
+
+**macOS/Linux/Git Bash**
+```bash
 cp .env.example .env
-
-# 3. Start the entire platform via Docker Compose
-docker compose up -d
-
-# 4. Open the Web Dashboard
-# Visit http://localhost:8080 in your browser.
-# Click "🚀 Load Demo Workload" on the Overview page to generate real e-commerce traffic,
-# capture telemetry, and synthesize optimization recommendations automatically!
 ```
 
-### Option B: Local Development / Manual Startup
-
-```bash
-# 1. Start PostgreSQL Databases
-docker compose up -d db sandbox-db
-
-# 2. Initialize Database Schemas & Seed Dataset
-pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-python scripts/setup_ecommerce_db.py
-
-# 3. Launch Backend Server (Port 8000)
-cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 4. Launch Frontend Dashboard (Port 8080 or Port 5173 for Vite dev)
-cd ../frontend
-npm install
-npm run dev
-
-# 5. Execute Complete 20-Step End-to-End Synthetic Scenario
-python scripts/run_e2e_scenario.py
+**Windows PowerShell**
+```powershell
+Copy-Item .env.example .env
 ```
 
----
+The example values are intended for local development. Change them before exposing the application or using any non-development environment.
 
-## Running the Automated Test Suite
+### 3. Build and start the application
 
 ```bash
-# Run complete unit, security, and component tests (105 passed)
+docker compose up -d --build
+```
+
+Docker Compose starts the application services, PostgreSQL databases, sandbox, and workload initialization service.
+
+To check service status:
+
+```bash
+docker compose ps
+```
+
+To inspect logs:
+
+```bash
+docker compose logs -f
+```
+
+### 4. Load and explore the demo workload
+
+Open the dashboard and use **Load Demo Workload** on the Overview page if the control is available. This generates sample workload activity for the platform to analyze.
+
+To stop the application:
+
+```bash
+docker compose down
+```
+
+To stop the application and remove persisted database volumes (this deletes local database data):
+
+```bash
+docker compose down -v
+```
+
+## Accessing the Application
+
+Once the services are running:
+
+| Service | URL |
+|---|---|
+| Web dashboard | [http://localhost:8080](http://localhost:8080) |
+| Backend API | [http://localhost:8000](http://localhost:8000) |
+| Interactive API documentation | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| Main PostgreSQL | `localhost:5432` |
+| Sandbox PostgreSQL | `localhost:5433` |
+
+The backend health endpoint is available at `http://localhost:8000/api/v1/health`.
+
+## How It Works
+
+1. **Collect:** gather query workload and database performance statistics.
+2. **Protect:** sanitize SQL and execution-plan information before AI processing.
+3. **Analyze:** inspect execution-plan structure and identify potential bottlenecks.
+4. **Recommend:** generate candidate indexes, query rewrites, or other optimization strategies.
+5. **Simulate:** evaluate candidate changes in the isolated sandbox where supported.
+6. **Review:** present estimated benefits, costs, and risks in the dashboard.
+7. **Approve:** require an authorized human to approve production-impacting changes.
+8. **Audit:** record relevant actions for traceability.
+
+## Security Design
+
+DBZenith is designed around three operational safeguards:
+
+1. **Privacy boundary:** sensitive literals and other protected information should be sanitized before data is sent to AI components.
+2. **Production protection:** AI analysis and optimization experiments are separated from direct production database modification.
+3. **Human approval:** production-impacting changes require approval from an authorized DBA or administrator.
+
+Additional controls include authentication, role-based authorization, restricted assistant tools, security middleware, and audit logging.
+
+> **Important:** These controls should be reviewed and tested before connecting DBZenith to any real production database. Do not treat a development configuration as production-hardened.
+
+## Testing
+
+### Backend tests
+
+Run from the repository root:
+
+```bash
 python -m pytest tests -k "not integration"
+```
 
-# Run PostgreSQL live integration tests
-$env:DBZENITH_INTEGRATION_DATABASE_URL="postgresql+psycopg://dbzenith:change_me_dev_only@localhost:5432/dbzenith"
-python -m pytest tests/integration/test_postgres_telemetry.py
+### Frontend tests
 
-# Run Frontend Production Build & TypeScript check
+```bash
 cd frontend
+npm install
+npm run test
+```
+
+### Frontend production build
+
+```bash
 npm run build
 ```
 
----
+Integration tests may require the PostgreSQL services and environment variables to be configured first. Consult the test files and project documentation for the exact requirements.
 
-## Security Hardening & RBAC
+## Project Structure
 
-- **Authentication**: HMAC-SHA256 authenticated URL-safe tokens with cryptographic timestamp expiration.
-- **Password Store**: PBKDF2-HMAC-SHA256 with 200,000 iterations and per-user 16-byte random hex salts.
-- **Roles**:
-  - `VIEWER`: Read-only access to metrics, slow queries, and summaries.
-  - `ANALYST`: Query details, plan analysis, and SQL rewrite testing.
-  - `DBA`: Sandbox simulation execution and human migration approval.
-  - `ADMIN`: User management and full administrative authorization.
-- **Unified Audit Ledger**: Immutable audit log stored in `security_audit_events` tracking logins, approvals, rejections, simulations, agent turns, and security alerts (`GET /api/v1/audit`).
-- **Rate Limiting**: Sliding-window rate limiter blocking brute-force authentication (20 req/min) and API abuse (120 req/min).
+```text
+DBzenith/
+├── ai/                 # AI models and optimization components
+├── backend/            # FastAPI application and services
+│   ├── app/
+│   │   ├── api/        # API routes
+│   │   ├── core/       # Configuration and core utilities
+│   │   ├── db/         # Database integration
+│   │   ├── models/     # Data models
+│   │   └── services/   # Privacy, telemetry, GNN, RL, sandbox, etc.
+│   └── alembic/        # Database migrations
+├── database/           # Database-related assets
+├── docs/               # Project documentation
+├── frontend/           # React + TypeScript dashboard
+├── sandbox/            # Sandbox database and workload assets
+├── scripts/            # Setup and utility scripts
+├── tests/              # Automated tests
+├── docker-compose.yml  # Multi-service local environment
+├── .env.example        # Example environment configuration
+├── ARCHITECTURE.md     # Architecture documentation, if present
+└── SECURITY.md         # Security documentation, if present
+```
 
----
+## Environment Configuration
 
-## Demonstration Workflow
+The `.env.example` file documents the main configuration values, including:
 
-1. Navigate to `http://localhost:5173` to view the **Overview** dashboard.
-2. Inspect the **Slow Queries** tab; adjust latency threshold to flag elevated queries.
-3. Open **Plan Viewer** or **GNN Analysis** to inspect graph topology, bottleneck detections, and surrogate cost inferences.
-4. Review **Recommendations** generated by the heuristic and RL advisory engines.
-5. Launch a **Sandbox Simulation** to evaluate HypoPG virtual index performance without production impact.
-6. Open **Approval Center**; verify that non-DBA roles cannot approve migrations. Enter an operator rationale and approve the migration.
-7. Converse with the **DBA Assistant** powered by LangGraph using 10 strictly authorized tools.
-8. Inspect **Audit Logs** to view the tamper-resistant ledger of all operator actions.
+- Application environment and logging
+- Backend port and CORS origins
+- PostgreSQL database name, user, password, and port
+- Sandbox database configuration
+- Telemetry thresholds and collection limits
+- Simulation safety limits
+- Frontend API base URL
 
----
+Do not commit a real `.env` file, passwords, API keys, or other secrets to version control.
 
-## Known Limitations
+## Important Notes
 
-1. **HypoPG Sandbox Support**: HypoPG is active in the isolated sandbox PostgreSQL image; production databases must either support HypoPG or use transactional DDL emulation.
-2. **PostgreSQL Version Variations**: Column names in `pg_stat_statements` differ between PG 13-16 (`blk_read_time`) and PG 17+ (`shared_blk_read_time`). DBZenith automatically handles this compatibility dynamically.
-3. **Complex CTE / Window Function Rewrites**: The SQL AST rewriter conserves semantics strictly and rejects non-deterministic functions (`random()`, `uuid_generate_v4()`) or volatile queries.
-4. **Production Deployment Configuration**: In a production cloud deployment (AWS RDS / GCP Cloud SQL), `shared_preload_libraries = 'pg_stat_statements'` and network firewall rules require database superuser setup.
+- DBZenith is intended for development, demonstration, and controlled evaluation unless it has been independently hardened for production.
+- HypoPG evaluates hypothetical indexes; it does not guarantee that a proposed change will improve every real workload.
+- Estimated query plans and sandbox benchmarks may differ from production behavior due to data size, statistics, hardware, concurrency, and configuration.
+- Always validate recommendations in a staging environment and take appropriate backups before making database changes.
+- Replace example credentials, restrict network access, and review database permissions before any deployment beyond a local development environment.
 
----
 
-## Roadmap
-
-- [x] Real PostgreSQL telemetry collector & sliding-window snapshots
-- [x] Privacy Gateway with structural AST tokenization
-- [x] GNN plan graph cost surrogate model
-- [x] Gymnasium RL optimization environment with DQN policy
-- [x] Safe SQL AST rewriter with semantic regression verification
-- [x] LangGraph conversational DBA assistant with 10 authorized tools
-- [x] Complete 11-view technical DBA frontend
-- [x] Enterprise security hardening (HMAC tokens, PBKDF2, RBAC, Audit Ledger)
-- [ ] Multi-database cluster federation (Aurora, Citus, TimescaleDB)
-- [ ] Automatic off-peak maintenance window migration scheduler
-- [ ] Cross-region read-replica telemetry correlation
+If you find this project useful, consider giving the repository a ⭐ on GitHub.
