@@ -6,6 +6,7 @@ import {
   createSimulation,
   approveRecommendation,
   rejectRecommendation,
+  calculateQueryOptimizations,
   type QueryDetail,
   type QueryOptimizationTrace,
 } from '../lib/api'
@@ -25,6 +26,8 @@ export function SlowQueries() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isCalculatingOptimizations, setIsCalculatingOptimizations] = useState(false)
+  const [calculationSuccessMsg, setCalculationSuccessMsg] = useState<string | null>(null)
 
   // Active query optimization trace state
   const [selectedTraceId, setSelectedTraceId] = useState<number | null>(null)
@@ -46,6 +49,34 @@ export function SlowQueries() {
         setError(err.message || 'Failed to fetch slow queries.')
       })
       .finally(() => setLoading(false))
+  }
+
+  const handleCalculateAllOptimizations = async () => {
+    setIsCalculatingOptimizations(true)
+    setError(null)
+    setCalculationSuccessMsg(null)
+    try {
+      const res = await calculateQueryOptimizations()
+      setCalculationSuccessMsg(`✓ Successfully evaluated and computed before/after plan costs and simulated latencies for ${res.calculated_count} queries!`)
+      fetchQueries()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to calculate query optimizations.')
+    } finally {
+      setIsCalculatingOptimizations(false)
+    }
+  }
+
+  const handleCalculateSingleQuery = async (queryId: number) => {
+    setIsCalculatingOptimizations(true)
+    setError(null)
+    try {
+      await calculateQueryOptimizations(queryId)
+      fetchQueries()
+    } catch (err: any) {
+      setError(err?.message || `Failed to calculate optimization for query #${queryId}.`)
+    } finally {
+      setIsCalculatingOptimizations(false)
+    }
   }
 
   useEffect(() => {
@@ -188,14 +219,41 @@ export function SlowQueries() {
           </select>
         </div>
 
-        <button
-          className="btn-secondary"
-          onClick={fetchQueries}
-          style={{ alignSelf: 'flex-end', padding: '8px 14px', height: '36px' }}
-        >
-          Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignSelf: 'flex-end', marginLeft: 'auto' }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleCalculateAllOptimizations}
+            disabled={isCalculatingOptimizations || loading}
+            style={{
+              padding: '8px 16px',
+              height: '36px',
+              background: '#059669',
+              borderColor: '#047857',
+              fontWeight: 600,
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            {isCalculatingOptimizations ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
+          </button>
+
+          <button
+            className="btn-secondary"
+            onClick={fetchQueries}
+            style={{ padding: '8px 14px', height: '36px', fontSize: '12px' }}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {calculationSuccessMsg && (
+        <div className="card" style={{ borderLeft: '4px solid #10b981', background: 'rgba(16, 185, 129, 0.08)', color: '#6ee7b7', padding: '12px 16px', marginBottom: '14px' }}>
+          <strong>{calculationSuccessMsg}</strong>
+        </div>
+      )}
 
       {error && <div className="alert">{error}</div>}
 
@@ -214,11 +272,10 @@ export function SlowQueries() {
                 <tr>
                   <th>Query ID</th>
                   <th>Severity</th>
-                  <th>Mean Latency</th>
-                  <th>Min / Max</th>
+                  <th>Plan Cost (Before → After)</th>
+                  <th>Latency (Before → After)</th>
                   <th>Executions</th>
                   <th>Shared Read / Hit</th>
-                  <th>Temp Spills</th>
                   <th>Normalized Statement</th>
                   <th>Actions</th>
                 </tr>
@@ -245,24 +302,58 @@ export function SlowQueries() {
                           )}
                         </td>
                         <td>
-                          <strong style={{ color: isCritical ? '#dc2626' : isWarning ? '#d97706' : '#166534' }}>
-                            {formatMs(q.mean_exec_time_ms)}
-                          </strong>
+                          {q.optimization_summary ? (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ color: '#fca5a5', fontSize: '12px' }}>
+                                  {q.optimization_summary.baseline_cost.toFixed(1)}
+                                </span>
+                                <span style={{ color: '#64748b' }}>→</span>
+                                <strong style={{ color: '#86efac', fontSize: '12px' }}>
+                                  {q.optimization_summary.proposed_cost.toFixed(1)}
+                                </strong>
+                              </div>
+                              <span className="badge" style={{ background: '#065f46', color: '#34d399', fontSize: '10px', marginTop: '3px' }}>
+                                -{q.optimization_summary.cost_improvement_pct}%
+                              </span>
+                            </div>
+                          ) : (
+                            <button
+                              className="secondary-button"
+                              style={{ fontSize: '10px', padding: '3px 8px' }}
+                              onClick={() => handleCalculateSingleQuery(q.query_id)}
+                              disabled={isCalculatingOptimizations}
+                            >
+                              Calc Cost
+                            </button>
+                          )}
                         </td>
                         <td>
-                          <small style={{ color: '#64748b' }}>
-                            {formatMs(q.min_exec_time_ms)} / {formatMs(q.max_exec_time_ms)}
-                          </small>
+                          {q.optimization_summary ? (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ color: '#f8fafc', fontSize: '12px' }}>
+                                  {formatMs(q.optimization_summary.baseline_latency_ms)}
+                                </span>
+                                <span style={{ color: '#64748b' }}>→</span>
+                                <strong style={{ color: '#38bdf8', fontSize: '12px' }}>
+                                  {formatMs(q.optimization_summary.simulated_latency_ms)}
+                                </strong>
+                              </div>
+                              <span className="badge" style={{ background: '#0369a1', color: '#7dd3fc', fontSize: '10px', marginTop: '3px' }}>
+                                {q.optimization_summary.speedup_factor}x faster
+                              </span>
+                            </div>
+                          ) : (
+                            <strong style={{ color: isCritical ? '#dc2626' : isWarning ? '#d97706' : '#166534' }}>
+                              {formatMs(q.mean_exec_time_ms)}
+                            </strong>
+                          )}
                         </td>
                         <td>{q.calls.toLocaleString()}</td>
                         <td>
                           <span title="Disk reads / Buffer hits">
                             {q.shared_blks_read.toLocaleString()} / {q.shared_blks_hit.toLocaleString()}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ color: q.temp_blks_written > 0 ? '#b91c1c' : '#64748b' }}>
-                            {q.temp_blks_written.toLocaleString()}
                           </span>
                         </td>
                         <td className="query-cell">{q.normalized_query}</td>
@@ -295,7 +386,7 @@ export function SlowQueries() {
                       {/* Expandable Inline Optimization Trace */}
                       {isTraceOpen && (
                         <tr>
-                          <td colSpan={9} style={{ background: '#090d16', padding: '16px' }}>
+                          <td colSpan={8} style={{ background: '#090d16', padding: '16px' }}>
                             {loadingTrace ? (
                               <div className="loading-box" style={{ color: '#94a3b8' }}>
                                 Constructing full Optimization Trace for Query #{q.query_id}...

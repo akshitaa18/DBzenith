@@ -36,6 +36,18 @@ export function getHealth(): Promise<{ status: string; service: string; version:
   return request('/api/v1/health')
 }
 
+export type QueryOptimizationSummary = {
+  baseline_cost: number
+  proposed_cost: number
+  cost_improvement_pct: number
+  baseline_latency_ms: number
+  simulated_latency_ms: number
+  speedup_factor: number
+  recommendation_id?: number | null
+  recommendation_type?: string | null
+  proposed_change?: string | null
+}
+
 export type QueryDetail = {
   id: number
   query_id: number
@@ -61,6 +73,7 @@ export type QueryDetail = {
   query_frequency_per_minute: number
   predicate_info: Record<string, unknown> | null
   explain_plan: unknown
+  optimization_summary?: QueryOptimizationSummary | null
 }
 
 export type QueryPage = {
@@ -96,6 +109,16 @@ export function getSlowQueries(page = 1, pageSize = 10, minMeanMs?: number): Pro
 
 export function getQueryDetail(queryId: number | string): Promise<QueryDetail> {
   return request(`/api/v1/queries/${queryId}`)
+}
+
+export function calculateQueryOptimizations(queryId?: number | string): Promise<{
+  status: string
+  calculated_count: number
+  new_simulations_created: number
+  items: QueryDetail[]
+}> {
+  const path = queryId !== undefined ? `/api/v1/queries/calculate-optimizations?query_id=${queryId}` : '/api/v1/queries/calculate-optimizations'
+  return request(path, { method: 'POST' })
 }
 
 export function getWorkloadSummary(): Promise<WorkloadSummary> {

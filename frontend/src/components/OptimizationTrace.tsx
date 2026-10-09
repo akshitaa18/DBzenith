@@ -102,10 +102,17 @@ export function OptimizationTrace({
     (baselineCost && proposedCost && baselineCost > 0 ? ((baselineCost - proposedCost) / baselineCost) * 100 : null)
 
   const latencyBefore = query?.mean_exec_time_ms ? formatMs(query.mean_exec_time_ms) : 'Not measured'
+  const simLatencyNum =
+    (simulation?.benchmark as any)?.simulated_latency_ms ??
+    (simulation?.benchmark as any)?.p50_simulated_ms ??
+    (simulation?.benchmark as any)?.queries?.[0]?.proposed_mean_execution_ms ??
+    (improvementPct && query?.mean_exec_time_ms
+      ? query.mean_exec_time_ms * (1 - improvementPct / 100)
+      : null)
   const latencyAfter =
-    simulation?.benchmark?.simulated_latency_ms
-      ? formatMs(Number(simulation.benchmark.simulated_latency_ms))
-      : 'Awaiting sandbox simulation'
+    simLatencyNum !== null && simLatencyNum !== undefined
+      ? formatMs(Number(simLatencyNum))
+      : 'Awaiting sandbox calculation'
 
   const confidenceScore =
     recommendation?.confidence !== undefined

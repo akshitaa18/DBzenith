@@ -22,6 +22,23 @@ function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
 }
 
+function formatWindow(seconds: number | undefined | null) {
+  if (!seconds || seconds <= 0) return 'Recent'
+  if (seconds >= 86400) {
+    const days = Math.round(seconds / 86400)
+    return `${days} ${days === 1 ? 'Day' : 'Days'} (${seconds.toLocaleString()}s)`
+  }
+  if (seconds >= 3600) {
+    const hours = Math.round(seconds / 3600)
+    return `${hours} ${hours === 1 ? 'Hour' : 'Hours'} (${seconds.toLocaleString()}s)`
+  }
+  if (seconds >= 60) {
+    const mins = Math.round(seconds / 60)
+    return `${mins} Min (${seconds.toLocaleString()}s)`
+  }
+  return `${seconds} s`
+}
+
 export function Overview() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +56,7 @@ export function Overview() {
     Promise.all([
       getHealth(),
       getWorkloadSummary(),
-      getWorkloadSnapshots(5),
+      getWorkloadSnapshots(10),
       getRecommendations(1, 5).catch(() => ({ items: [], total: 0, page: 1, page_size: 5 })),
     ])
       .then(([h, s, snaps, recs]) => {
@@ -364,7 +381,7 @@ export function Overview() {
                   <tr key={String(s.id ?? idx)}>
                     <td><code>#{String(s.id ?? idx)}</code></td>
                     <td>{s.captured_at ? new Date(String(s.captured_at)).toLocaleString() : 'Recent'}</td>
-                    <td>{String(s.window_seconds ?? 60)} s</td>
+                    <td><span className="badge badge-observed" style={{ fontSize: '11px' }}>{formatWindow(Number(s.window_seconds ?? 60))}</span></td>
                     <td>{Number(s.total_calls ?? 0).toLocaleString()}</td>
                     <td>{formatMs(Number(s.total_exec_time_ms ?? 0))}</td>
                     <td>

@@ -30,10 +30,14 @@ class QueryDetail(BaseModel):
     query_frequency_per_minute: float
     predicate_info: dict | None
     explain_plan: list | dict | None
+    optimization_summary: dict | None = None
 
     @classmethod
-    def from_model(cls, value):
-        return cls.model_validate(value)
+    def from_model(cls, value, optimization_summary: dict | None = None):
+        instance = cls.model_validate(value)
+        if optimization_summary is not None:
+            instance.optimization_summary = optimization_summary
+        return instance
 
 
 class PaginatedQueries(BaseModel):

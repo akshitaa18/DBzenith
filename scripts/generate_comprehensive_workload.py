@@ -538,48 +538,90 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
             session.commit()
         print(f"  [OK] Demo orders ready: {session.execute(text('SELECT count(*) FROM telemetry_demo_orders;')).scalar()} rows.")
 
-        # 3. Create Multi-Snapshot Historical Progression
-        print("\n[Step 3/7] Generating 3 sequential telemetry snapshots (Timeline Trend)...")
+        # 3. Create Multi-Snapshot Historical Progression (Extended Multi-Day Enterprise Timeline)
+        print("\n[Step 3/7] Generating 7 sequential telemetry snapshots (Extended 7-Day & 24-Hour Timeline)...")
         now = datetime.now(timezone.utc)
         snapshots = []
-        # Snapshot 1: 15 minutes ago
+
+        # Snapshot 1: 7 days ago (Weekly baseline)
         s1 = WorkloadSnapshot(
-            captured_at=now - timedelta(minutes=15),
-            window_seconds=600.0,
-            total_calls=45000,
-            total_exec_time_ms=12500000.0,
+            captured_at=now - timedelta(days=7),
+            window_seconds=604800.0,
+            total_calls=1250000,
+            total_exec_time_ms=384000000.0,
             unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=sum(1 for q in COMPREHENSIVE_QUERIES if q["mean_ms"] >= 100.0),
+            slow_queries=21,
         )
-        session.add(s1); session.flush()
-        snapshots.append(s1)
+        session.add(s1); session.flush(); snapshots.append(s1)
 
-        # Snapshot 2: 5 minutes ago
+        # Snapshot 2: 3 days ago
         s2 = WorkloadSnapshot(
-            captured_at=now - timedelta(minutes=5),
-            window_seconds=600.0,
-            total_calls=68000,
-            total_exec_time_ms=18900000.0,
+            captured_at=now - timedelta(days=3),
+            window_seconds=259200.0,
+            total_calls=780000,
+            total_exec_time_ms=210000000.0,
             unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=sum(1 for q in COMPREHENSIVE_QUERIES if q["mean_ms"] >= 100.0),
+            slow_queries=21,
         )
-        session.add(s2); session.flush()
-        snapshots.append(s2)
+        session.add(s2); session.flush(); snapshots.append(s2)
 
-        # Snapshot 3: Current Snapshot
+        # Snapshot 3: 24 hours ago (Daily window)
         s3 = WorkloadSnapshot(
+            captured_at=now - timedelta(hours=24),
+            window_seconds=86400.0,
+            total_calls=340000,
+            total_exec_time_ms=95000000.0,
+            unique_queries=len(COMPREHENSIVE_QUERIES),
+            slow_queries=21,
+        )
+        session.add(s3); session.flush(); snapshots.append(s3)
+
+        # Snapshot 4: 12 hours ago
+        s4 = WorkloadSnapshot(
+            captured_at=now - timedelta(hours=12),
+            window_seconds=43200.0,
+            total_calls=195000,
+            total_exec_time_ms=56000000.0,
+            unique_queries=len(COMPREHENSIVE_QUERIES),
+            slow_queries=21,
+        )
+        session.add(s4); session.flush(); snapshots.append(s4)
+
+        # Snapshot 5: 6 hours ago
+        s5 = WorkloadSnapshot(
+            captured_at=now - timedelta(hours=6),
+            window_seconds=21600.0,
+            total_calls=98000,
+            total_exec_time_ms=28000000.0,
+            unique_queries=len(COMPREHENSIVE_QUERIES),
+            slow_queries=21,
+        )
+        session.add(s5); session.flush(); snapshots.append(s5)
+
+        # Snapshot 6: 1 hour ago
+        s6 = WorkloadSnapshot(
+            captured_at=now - timedelta(hours=1),
+            window_seconds=3600.0,
+            total_calls=22000,
+            total_exec_time_ms=6400000.0,
+            unique_queries=len(COMPREHENSIVE_QUERIES),
+            slow_queries=21,
+        )
+        session.add(s6); session.flush(); snapshots.append(s6)
+
+        # Snapshot 7: Current Cumulative 24-Hour Production Observation Window
+        s7 = WorkloadSnapshot(
             captured_at=now,
-            window_seconds=300.0,
+            window_seconds=86400.0,
             total_calls=sum(q["calls"] for q in COMPREHENSIVE_QUERIES),
             total_exec_time_ms=sum(q["calls"] * q["mean_ms"] for q in COMPREHENSIVE_QUERIES),
             unique_queries=len(COMPREHENSIVE_QUERIES),
             slow_queries=sum(1 for q in COMPREHENSIVE_QUERIES if q["mean_ms"] >= 100.0),
         )
-        session.add(s3); session.flush()
-        snapshots.append(s3)
+        session.add(s7); session.flush(); snapshots.append(s7)
 
         # 4. Populate Query Statistics for the latest snapshot
-        print("\n[Step 4/7] Registering 28 comprehensive queries with diverse execution characteristics...")
+        print("\n[Step 4/7] Registering 28 comprehensive queries with 24-hour observation telemetry...")
         import xxhash
 
         db_name = session.execute(text("SELECT current_database();")).scalar() or "dbzenith"
@@ -618,7 +660,7 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
             }]
 
             stat = QueryStatistic(
-                snapshot_id=s3.id,
+                snapshot_id=s7.id,
                 query_id=h,
                 database_oid=16384,
                 user_oid=10,
@@ -641,7 +683,7 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
                 temp_blks_written=item["temp_written"],
                 blk_read_time_ms=round(item["read"] * 0.05, 2),
                 blk_write_time_ms=0.0,
-                query_frequency_per_minute=round(item["calls"] / 5.0, 1),
+                query_frequency_per_minute=round(item["calls"] / 1440.0, 2),
                 predicate_info={"table": item["relation"], "type": item["category"]},
                 explain_plan=mock_plan,
             )
@@ -660,40 +702,54 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
         for r in recs[:6]:
             print(f"    - [{r.type}] target={r.target}: {r.proposed_change[:60]}...")
 
-        # 6. Populate Isolated Sandbox Simulations (HypoPG Virtual Indexes)
-        print("\n[Step 6/7] Pre-computing sandbox simulations with before/after plan diffs...")
+        # 6. Populate Isolated Sandbox Simulations for ALL Recommendations
+        print("\n[Step 6/7] Pre-computing sandbox simulations with before/after plan diffs for ALL recommendations...")
         sim_count = 0
         for r in recs:
-            if r.type in {"index_where", "index_join", "composite_index", "query_rewrite"}:
-                # Create a realistic simulation evaluation
-                baseline = round(float(r.evidence.get("total_exec_time_ms", 12500) or 12500), 2)
-                speedup_pct = 74.5 if r.type == "index_where" else 62.0 if r.type == "composite_index" else 48.0
-                proposed = round(baseline * (1.0 - (speedup_pct / 100.0)), 2)
+            baseline = round(float(r.evidence.get("total_exec_time_ms", 12500) or 12500), 2)
+            matching_q = next((q for q in COMPREHENSIVE_QUERIES if r.target and r.target.lower() in q["query"].lower()), COMPREHENSIVE_QUERIES[0])
+            baseline_latency = round(matching_q["mean_ms"], 2)
 
-                sim = OptimizationSimulation(
-                    recommendation_id=r.id,
-                    status="completed",
-                    baseline_cost=baseline,
-                    proposed_cost=proposed,
-                    improvement=speedup_pct,
-                    affected_queries=r.affected_queries,
-                    plan_differences=[
-                        {"operator": "Seq Scan -> Index Scan", "speedup": f"{speedup_pct}%", "cost_delta": round(baseline - proposed, 2)}
-                    ],
-                    estimated_storage_impact={"estimated_index_bytes": 1843200, "formatted": "1.8 MB"},
-                    write_overhead_estimate={"insert_overhead_pct": 3.2, "update_overhead_pct": 1.8},
-                    confidence=r.confidence,
-                    benchmark={"runs": 5, "p50_baseline_ms": 420.0, "p50_simulated_ms": 98.0, "improvement_pct": speedup_pct},
-                    baseline_plans=[{"Node Type": "Seq Scan", "Total Cost": baseline}],
-                    proposed_plans=[{"Node Type": "Index Scan", "Total Cost": proposed}],
-                )
-                session.add(sim)
-                sim_count += 1
-                if sim_count >= 8:
-                    break
+            speedup_pct = 74.5 if r.type == "index_where" else 62.0 if r.type == "composite_index" else 58.0 if r.type == "index_join" else 68.0 if r.type == "partition_by_range" else 42.0 if r.type == "join_strategy" else 38.0
+            proposed = round(baseline * (1.0 - (speedup_pct / 100.0)), 2)
+            sim_latency = round(baseline_latency * (1.0 - (speedup_pct / 100.0)), 2)
+            speedup_factor = round(baseline_latency / max(sim_latency, 0.01), 1)
+
+            sim = OptimizationSimulation(
+                recommendation_id=r.id,
+                status="completed",
+                baseline_cost=baseline,
+                proposed_cost=proposed,
+                improvement=speedup_pct,
+                affected_queries=r.affected_queries or [{"query_id": matching_q.get("query_id", 1), "mean_exec_time_ms": baseline_latency}],
+                plan_differences=[
+                    {
+                        "operator": f"{matching_q.get('explain_type', 'Scan')} -> Optimized Index/Rewrite Path",
+                        "speedup": f"{speedup_pct}%",
+                        "cost_delta": round(baseline - proposed, 2),
+                        "detail": f"Latency projected from {baseline_latency}ms to {sim_latency}ms ({speedup_factor}x faster)",
+                    }
+                ],
+                estimated_storage_impact={"estimated_index_bytes": 1843200, "formatted": "1.8 MB"},
+                write_overhead_estimate={"insert_overhead_pct": 3.2, "update_overhead_pct": 1.8},
+                confidence=r.confidence,
+                benchmark={
+                    "runs": 5,
+                    "simulated_latency_ms": sim_latency,
+                    "baseline_latency_ms": baseline_latency,
+                    "p50_baseline_ms": baseline_latency,
+                    "p50_simulated_ms": sim_latency,
+                    "improvement_pct": speedup_pct,
+                    "speedup_factor": speedup_factor,
+                },
+                baseline_plans=[{"Node Type": matching_q.get("explain_type", "Seq Scan"), "Total Cost": baseline}],
+                proposed_plans=[{"Node Type": "Index Scan", "Total Cost": proposed}],
+            )
+            session.add(sim)
+            sim_count += 1
 
         session.commit()
-        print(f"  [OK] {sim_count} isolated sandbox simulations populated.")
+        print(f"  [OK] {sim_count} isolated sandbox simulations populated with complete before/after cost & latency metrics.")
 
         # 7. Seed Human Approval Decisions & Security Audit Ledger
         print("\n[Step 7/7] Seeding Human Approval Center decisions & Audit Ledger...")
@@ -768,12 +824,12 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
         print("=" * 70)
         print("Summary:")
         print(f"  * Total Registered Queries: {len(COMPREHENSIVE_QUERIES)}")
-        print("  * Snapshots Created: 3 (Historical Timeline)")
+        print(f"  * Snapshots Created: {len(snapshots)} (Extended 7-Day & 24-Hour Timeline)")
         print("  * Critical Latency Queries (>=500ms): 6")
         print("  * High Latency Queries (100-499ms): 16")
         print("  * Fast Baseline Queries (<100ms): 6")
         print(f"  * Optimization Recommendations: {len(recs)}")
-        print(f"  * HypoPG Virtual Sandbox Simulations: {sim_count}")
+        print(f"  * HypoPG Virtual Sandbox Simulations: {sim_count} (100% Coverage)")
         print(f"  * Human Approval Decisions Seeded: 2 (1 Approved, 1 Rejected, {len(recs) - 2} Pending)")
         print("=" * 70)
 

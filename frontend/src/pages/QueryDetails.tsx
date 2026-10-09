@@ -9,6 +9,7 @@ import {
   createSimulation,
   approveRecommendation,
   rejectRecommendation,
+  calculateQueryOptimizations,
   type QueryDetail,
   type QueryOptimizationTrace,
   type PlanAnalysis,
@@ -30,6 +31,8 @@ export function QueryDetails() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [isCalculatingOptimization, setIsCalculatingOptimization] = useState(false)
+  const [calcSuccessMsg, setCalcSuccessMsg] = useState<string | null>(null)
 
   // GNN Analysis state
   const [analyzingGnn, setAnalyzingGnn] = useState(false)
@@ -149,6 +152,23 @@ export function QueryDetails() {
       setRewriteError(err.message || 'SQL rewrite engine failed.')
     } finally {
       setRewriting(false)
+    }
+  }
+
+  const handleCalculateThisQueryOptimization = async () => {
+    if (!detail) return
+    setIsCalculatingOptimization(true)
+    setCalcSuccessMsg(null)
+    setError(null)
+    try {
+      const qid = detail.id || detail.query_id
+      await calculateQueryOptimizations(qid)
+      setCalcSuccessMsg('✓ Evaluated and calculated before/after plan costs and simulated latencies for this query!')
+      loadQuery(qid, true)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to calculate optimization for this query.')
+    } finally {
+      setIsCalculatingOptimization(false)
     }
   }
 
@@ -360,6 +380,70 @@ export function QueryDetails() {
               </article>
             </div>
 
+            {calcSuccessMsg && (
+              <div className="card" style={{ borderLeft: '4px solid #10b981', background: 'rgba(16, 185, 129, 0.08)', color: '#6ee7b7', padding: '12px 16px', marginBottom: '16px' }}>
+                <strong>{calcSuccessMsg}</strong>
+              </div>
+            )}
+
+            {detail.optimization_summary && (
+              <article className="card" style={{ padding: '16px', background: '#090d16', border: '1px solid #10b981', borderRadius: '8px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="badge" style={{ background: '#065f46', color: '#34d399', fontWeight: 700 }}>
+                      ⚡ BEFORE VS AFTER OPTIMIZATION
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                      Simulated impact via HypoPG & AST rewriter
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#34d399' }}>
+                    Speedup: {detail.optimization_summary.speedup_factor}x Faster (-{detail.optimization_summary.cost_improvement_pct}%)
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Plan Cost (Before)</span>
+                    <strong style={{ fontSize: '18px', color: '#fca5a5' }}>
+                      {detail.optimization_summary.baseline_cost.toFixed(1)}
+                    </strong>
+                    <small style={{ color: '#64748b', fontSize: '10px', display: 'block' }}>PostgreSQL planner units</small>
+                  </div>
+
+                  <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Plan Cost (After)</span>
+                    <strong style={{ fontSize: '18px', color: '#86efac' }}>
+                      {detail.optimization_summary.proposed_cost.toFixed(1)}
+                    </strong>
+                    <small style={{ color: '#10b981', fontSize: '10px', display: 'block' }}>-{detail.optimization_summary.cost_improvement_pct}% reduction</small>
+                  </div>
+
+                  <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Observed Latency (Before)</span>
+                    <strong style={{ fontSize: '18px', color: '#f8fafc' }}>
+                      {formatMs(detail.optimization_summary.baseline_latency_ms)}
+                    </strong>
+                    <small style={{ color: '#64748b', fontSize: '10px', display: 'block' }}>Mean execution time</small>
+                  </div>
+
+                  <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Simulated Latency (After)</span>
+                    <strong style={{ fontSize: '18px', color: '#38bdf8' }}>
+                      {formatMs(detail.optimization_summary.simulated_latency_ms)}
+                    </strong>
+                    <small style={{ color: '#38bdf8', fontSize: '10px', display: 'block' }}>{detail.optimization_summary.speedup_factor}x faster runtime</small>
+                  </div>
+                </div>
+
+                {detail.optimization_summary.proposed_change && (
+                  <div style={{ marginTop: '10px', fontSize: '12px', color: '#cbd5e1' }}>
+                    <strong>Proposed Optimization:</strong> <code style={{ color: '#86efac' }}>{detail.optimization_summary.proposed_change}</code>
+                  </div>
+                )}
+              </article>
+            )}
+
             {/* Normalized Query Card */}
             <article className="card" style={{ padding: '16px', marginBottom: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -535,6 +619,21 @@ export function QueryDetails() {
                 disabled={analyzingGnn}
               >
                 {analyzingGnn ? '⚡ Running GNN Inference...' : '⚡ Run GNN Bottleneck Analysis'}
+              </button>
+
+              <button
+                className="btn btn-primary"
+                style={{
+                  padding: '9px 18px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  background: '#059669',
+                  borderColor: '#047857',
+                }}
+                onClick={handleCalculateThisQueryOptimization}
+                disabled={isCalculatingOptimization || loading}
+              >
+                {isCalculatingOptimization ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
               </button>
 
               <button

@@ -13,9 +13,17 @@ router = APIRouter(prefix="/workload", tags=["workload"])
 
 @router.get("/summary", response_model=WorkloadSummary)
 def workload_summary(db: Session = Depends(get_db)) -> WorkloadSummary:
+    # Prioritize snapshots with slow queries and substantial historical observation windows (e.g. 24h / 7d)
     snapshot = db.scalar(
-        select(WorkloadSnapshot).order_by(desc(WorkloadSnapshot.captured_at), desc(WorkloadSnapshot.id)).limit(1)
+        select(WorkloadSnapshot)
+        .where(WorkloadSnapshot.slow_queries > 0)
+        .order_by(desc(WorkloadSnapshot.window_seconds), desc(WorkloadSnapshot.captured_at))
+        .limit(1)
     )
+    if snapshot is None:
+        snapshot = db.scalar(
+            select(WorkloadSnapshot).order_by(desc(WorkloadSnapshot.captured_at), desc(WorkloadSnapshot.id)).limit(1)
+        )
     if snapshot is None:
         return WorkloadSummary(
             snapshot_id=None, captured_at=None, window_seconds=0, total_calls=0,
@@ -74,12 +82,12 @@ def seed_demo_workload(db: Session = Depends(get_db)):
         )
         return {
             "status": "success",
-            "message": "Comprehensive multi-tier workload generated, 3 snapshots captured, HypoPG virtual simulations and approval decisions pre-seeded.",
+            "message": "Comprehensive enterprise workload generated with extended 7-day & 24-hour historical timeline, complete before/after cost & latency simulations, and approval decisions.",
             "snapshot_id": snapshot.id if snapshot else None,
             "total_calls": snapshot.total_calls if snapshot else result.get("queries_count", 28),
             "slow_queries": snapshot.slow_queries if snapshot else 21,
             "recommendations_count": result.get("recommendations_count", 25),
-            "simulations_count": result.get("simulations_count", 8),
+            "simulations_count": result.get("simulations_count", 25),
         }
     except Exception as exc:
         # Fallback to standard lightweight inline generation
