@@ -203,7 +203,7 @@ class TelemetryCollector:
             pass
 
         try:
-            from scripts.generate_comprehensive_workload import COMPREHENSIVE_QUERIES
+            from app.services.workload.generator import COMPREHENSIVE_QUERIES
             result = []
             for item in COMPREHENSIVE_QUERIES:
                 q_text = item["query"]

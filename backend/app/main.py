@@ -9,7 +9,10 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.db.base import Base
+from app.db.session import get_engine
 from app.services.collector.telemetry import TelemetryWorker
+from app.services.workload.generator import auto_seed_if_empty
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -20,6 +23,12 @@ telemetry_worker = TelemetryWorker()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("application_started", extra={"event": "application_started", "environment": settings.app_env})
+    # Ensure database schema is created and auto-seed comprehensive workload if fresh
+    try:
+        Base.metadata.create_all(bind=get_engine())
+        auto_seed_if_empty()
+    except Exception as exc:
+        logger.warning(f"Database auto-seed / table initialization skipped: {exc}")
     telemetry_worker.start()
     yield
     telemetry_worker.stop()

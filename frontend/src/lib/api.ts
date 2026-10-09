@@ -291,9 +291,12 @@ export function getReadiness(): Promise<{ status: string; database: string }> {
 }
 
 export async function getWorkloadSnapshots(limit = 10): Promise<Record<string, unknown>[]> {
-  const data = await request<Record<string, unknown>>(`/api/v1/workload/summary`)
-  void limit
-  return [data]
+  try {
+    return await request<Record<string, unknown>[]>(`/api/v1/workload/snapshots?limit=${limit}`)
+  } catch {
+    const data = await request<Record<string, unknown>>(`/api/v1/workload/summary`)
+    return [data]
+  }
 }
 
 export function getAssistantAuditLogs(): Promise<Array<{
