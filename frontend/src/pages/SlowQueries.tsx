@@ -173,6 +173,26 @@ export function SlowQueries() {
       {/* Visual Pipeline Header */}
       <OptimizationFlowHeader currentStage="detect" />
 
+      {/* Self-Explanatory Telemetry Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">⏱️</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>CONTINUOUS POSTGRESQL TELEMETRY MONITORING</span>
+            <span className="badge badge-observed">PG_STAT_STATEMENTS</span>
+          </div>
+          <p className="guide-banner-desc">
+            This dashboard continuously observes normalized SQL executions from PostgreSQL's <code>pg_stat_statements</code>. Each slow query is analyzed across the 3 severity tiers. Click <strong>"Calculate Before/After Cost & Latency"</strong> to run or refresh HypoPG virtual index cost simulations across all slow queries.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-danger">Critical: &ge;500ms</span>
+            <span className="badge badge-warning">High: 100–499ms</span>
+            <span className="badge badge-success">Standard: &lt;100ms</span>
+            <span className="badge badge-ai-analysis">⚡ 100% Simulation Coverage</span>
+          </div>
+        </div>
+      </div>
+
       <div className="card filter-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px 18px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <label style={{ fontSize: '11px', fontWeight: 600, color: '#475467' }}>Search Query / ID</label>

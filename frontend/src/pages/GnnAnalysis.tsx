@@ -168,23 +168,27 @@ export function GnnAnalysisPage() {
       </div>
 
       {/* Architectural Transparency Banner */}
-      <div className="card" style={{ padding: '12px 16px', background: '#090d16', border: '1px solid #1e293b' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>
-            Deterministic Pipeline Architecture (GNN is a structural classifier, not an LLM)
-          </span>
-          <span style={{ fontSize: '11px', color: '#38bdf8' }}>
-            Raw Data Exposure = 0 Bytes
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#94a3b8', marginTop: '6px', flexWrap: 'wrap' }}>
-          <span>Execution Plan</span> &rarr;
-          <span style={{ color: '#10b981' }}>Privacy Gateway</span> &rarr;
-          <span>Graph Construction</span> &rarr;
-          <span style={{ color: '#38bdf8', fontWeight: 700 }}>GNN (Node Classification)</span> &rarr;
-          <span>Evidence Extraction</span> &rarr;
-          <span style={{ color: '#a78bfa', fontWeight: 700 }}>Explanation Layer</span> &rarr;
-          <span style={{ color: '#f8fafc' }}>DBA Actionable Decision</span>
+      <div className="guide-banner">
+        <div className="guide-banner-icon">🧠</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>GRAPH NEURAL NETWORK PLAN EMBEDDING & RL POLICY</span>
+            <span className="badge badge-ai-analysis">AI STRUCTURAL CLASSIFIER</span>
+          </div>
+          <p className="guide-banner-desc">
+            DBZenith models PostgreSQL execution trees as directed operator graphs using PyTorch Geometric GNN embeddings. This allows the system to predict cost curves and evaluate Reinforcement Learning index selection policies without exposing any user data (0 bytes raw table data exposure).
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-observed">Execution Plan</span>
+            <span>&rarr;</span>
+            <span className="badge badge-success">Privacy Gateway</span>
+            <span>&rarr;</span>
+            <span className="badge badge-ai-analysis">GNN Node Classification</span>
+            <span>&rarr;</span>
+            <span className="badge badge-simulation">Evidence Extraction</span>
+            <span>&rarr;</span>
+            <span className="badge badge-recommendation">Actionable Decision</span>
+          </div>
         </div>
       </div>
 

@@ -76,6 +76,25 @@ export function AuditLogsPage() {
         subtitle="Final verification step of the optimization lifecycle. Every recommendation change, sandbox test, approval decision, and assistant action is cryptographically and immutably recorded."
       />
 
+      {/* Self-Explanatory Audit Ledger Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">📜</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>IMMUTABLE CRYPTOGRAPHIC AUDIT & COMPLIANCE LEDGER</span>
+            <span className="badge badge-approval-required">STAGE 7: AUDIT</span>
+          </div>
+          <p className="guide-banner-desc">
+            Provides complete regulatory transparency for autonomous DBA operations. Every action—including AI tool calls, sandbox simulations, human approvals, and rejected recommendations—is appended to this tamper-evident ledger with operator timestamps and execution rationale.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-success">✓ Zero Unlogged Actions</span>
+            <span className="badge badge-observed">✓ Operator Sign-Off Stamped</span>
+            <span className="badge badge-ai-analysis">✓ Tool Invocations Audited</span>
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>

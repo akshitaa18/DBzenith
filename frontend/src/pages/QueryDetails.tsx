@@ -278,6 +278,20 @@ export function QueryDetails() {
 
       <OptimizationFlowHeader currentStage="analyze" />
 
+      {/* Self-Explanatory Deep Dive Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">🔍</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>QUERY PERFORMANCE INSPECTION & OPTIMIZATION HUB</span>
+            <span className="badge badge-observed">STAGE 2 & 3</span>
+          </div>
+          <p className="guide-banner-desc">
+            Inspect raw execution stats, buffer cache hit rates, EXPLAIN plan nodes, and simulated optimization deltas. Review the dedicated <strong>Before vs After Optimization</strong> card below to evaluate HypoPG virtual index speedups and send approved changes to the Human Approval Center.
+          </p>
+        </div>
+      </div>
+
       {/* Query Search / Selection Bar */}
       <form onSubmit={handleLookup} className="card filter-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <label style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0' }}>Query Identifier:</label>

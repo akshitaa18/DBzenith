@@ -95,21 +95,22 @@ export function ApprovalCenterPage() {
         </button>
       </div>
 
-      {/* Safety Alert Banner */}
-      <div
-        className="card"
-        style={{
-          background: 'rgba(239, 68, 68, 0.05)',
-          borderLeft: '4px solid #ef4444',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '14px 18px',
-        }}
-      >
-        <span style={{ fontSize: '1.25rem' }}>🛡️</span>
-        <div style={{ fontSize: '0.85rem', color: '#fca5a5' }}>
-          <strong>Production Safety Invariant:</strong> DBZenith enforces a hard isolation boundary between advisory engines and the active database catalog. An immutable audit record with your operator rationale is logged upon every decision.
+      {/* Human Gate Invariant Guide Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">🛡️</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>MANDATORY HUMAN APPROVAL GATEWAY & AUDIT LEDGER</span>
+            <span className="badge badge-approval-required">HARD SAFETY INVARIANT</span>
+          </div>
+          <p className="guide-banner-desc">
+            DBZenith strictly enforces that <strong>no autonomous AI agent or advisor may mutate production schemas without explicit DBA sign-off</strong>. Every approval requires an operator justification and is permanently stamped into the immutable cryptographic audit ledger.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-success">✓ Zero Unattended DDL</span>
+            <span className="badge badge-simulation">✓ Sandbox Evidence Checked</span>
+            <span className="badge badge-ai-analysis">✓ Tamper-Evident Audit Logging</span>
+          </div>
         </div>
       </div>
 

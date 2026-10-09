@@ -29,6 +29,25 @@ export function DbaAssistantPage() {
         </div>
       </div>
 
+      {/* Self-Explanatory Assistant Guide Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">🤖</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>CONVERSATIONAL DBA COPILOT & TOOL REGISTRY</span>
+            <span className="badge badge-ai-analysis">LANGGRAPH AGENT</span>
+          </div>
+          <p className="guide-banner-desc">
+            An autonomous database assistant with 10 strictly authorized tools (Query Telemetry, EXPLAIN Inspector, HypoPG Sandbox, Index Advisor, System Gauges). The assistant is constrained by prompt-injection barriers and cannot execute arbitrary destructive DDL without routing through the Human Approval Center.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-observed">10 Sandboxed Tools</span>
+            <span className="badge badge-simulation">Virtual Index Simulator</span>
+            <span className="badge badge-approval-required">Gated Production DDL</span>
+          </div>
+        </div>
+      </div>
+
       {/* Main Container: Chat + Controlled Tools Sidebar */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '16px', alignItems: 'start' }}>
         {/* Chat UI */}

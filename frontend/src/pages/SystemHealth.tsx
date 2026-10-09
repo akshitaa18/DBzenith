@@ -47,6 +47,25 @@ export function SystemHealthPage() {
         </button>
       </div>
 
+      {/* Self-Explanatory Infrastructure Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">💓</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>POSTGRESQL INFRASTRUCTURE HEALTH & RUNTIME GAUGES</span>
+            <span className="badge badge-observed">HEALTH MONITORING</span>
+          </div>
+          <p className="guide-banner-desc">
+            Monitors real-time PostgreSQL operational parameters: connection pools, buffer cache hit rates, dead tuple bloat, telemetry collectors, and API readiness probes. Auto-refreshes every 30 seconds.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-success">✓ Backend API Online</span>
+            <span className="badge badge-observed">✓ Database Pool Connected</span>
+            <span className="badge badge-ai-analysis">✓ Worker Thread Running</span>
+          </div>
+        </div>
+      </div>
+
       {/* Error notification */}
       {error && (
         <div className="card" style={{ borderColor: '#ef4444', color: '#fca5a5' }}>

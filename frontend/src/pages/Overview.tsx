@@ -210,6 +210,26 @@ export function Overview() {
       {/* Visual Pipeline Flow Header */}
       <OptimizationFlowHeader currentStage="detect" />
 
+      {/* Self-Explanatory Overview Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">📊</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>WELCOME TO DBZENITH — AUTONOMOUS POSTGRESQL DBA</span>
+            <span className="badge badge-observed">ENTERPRISE TELEMETRY</span>
+          </div>
+          <p className="guide-banner-desc">
+            DBZenith continuously observes live PostgreSQL workload statistics, classifies execution bottlenecks via Graph Neural Networks, generates targeted optimizations (Index Advisor, AST Rewriter, Partitioning, Join Strategies), tests every change in an isolated HypoPG virtual index sandbox, and presents validated changes for human approval.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-observed">Observation Window: 24 Hours & 7 Days</span>
+            <span className="badge badge-ai-analysis">Privacy Gateway: Active (0 bytes data exposure)</span>
+            <span className="badge badge-simulation">HypoPG Sandbox: Ready</span>
+            <span className="badge badge-approval-required">Human Gate: Active</span>
+          </div>
+        </div>
+      </div>
+
       {/* Core Telemetry Cards */}
       <div className="grid metrics" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '14px', marginBottom: '20px' }}>
         <article className="card">

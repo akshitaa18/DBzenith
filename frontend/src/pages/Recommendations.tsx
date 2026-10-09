@@ -93,6 +93,25 @@ export function RecommendationsPage() {
         subtitle="Optimization candidates synthesized from EXPLAIN bottlenecks, table bloat statistics, and RL policy scoring. Click 'Inspect Full Optimization Trace' on any card to evaluate."
       />
 
+      {/* Self-Explanatory Advisor Engine Banner */}
+      <div className="guide-banner">
+        <div className="guide-banner-icon">💡</div>
+        <div className="guide-banner-content">
+          <div className="guide-banner-title">
+            <span>AUTONOMOUS OPTIMIZATION ADVISORS & AI POLICIES</span>
+            <span className="badge badge-recommendation">STAGE 3: RECOMMEND</span>
+          </div>
+          <p className="guide-banner-desc">
+            Candidate optimizations synthesized across 4 advisory engines: <strong>Index Advisor</strong> (B-Trees and composite indexes), <strong>AST SQL Rewriter</strong> (eliminates redundant operations), <strong>Partition Advisor</strong>, and <strong>Join Reordering</strong>. Click <strong>"Simulate in Sandbox"</strong> on any recommendation to test in HypoPG before approving.
+          </p>
+          <div className="guide-banner-pills">
+            <span className="badge badge-observed">4 Advisor Engines</span>
+            <span className="badge badge-simulation">HypoPG Sandbox Gated</span>
+            <span className="badge badge-approval-required">Human Approval Mandatory</span>
+          </div>
+        </div>
+      </div>
+
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
