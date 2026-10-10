@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { seedDemoWorkload } from '../lib/api'
+import { seedDemoWorkload, type UserRole } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 
 interface NavSection {
   title: string
@@ -9,6 +10,7 @@ interface NavSection {
     label: string
     icon: string
     hint: string
+    minRole?: UserRole
   }>
 }
 
@@ -33,7 +35,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'SIMULATE & VALIDATE',
     items: [
       { path: '/simulations', label: 'Sandbox Simulations', icon: '🧪', hint: 'HypoPG virtual index sandbox' },
-      { path: '/approvals', label: 'Approval Center', icon: '🛡️', hint: 'Human DBA sign-off gate' },
+      { path: '/approvals', label: 'Approval Center', icon: '🛡️', hint: 'Human DBA sign-off gate', minRole: 'DBA' },
     ],
   },
   {
@@ -41,7 +43,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { path: '/assistant', label: 'DBA Assistant', icon: '🤖', hint: 'Autonomous conversational copilot' },
       { path: '/health', label: 'System Health', icon: '💓', hint: 'PostgreSQL cache & connection gauges' },
-      { path: '/audit', label: 'Audit Logs', icon: '📜', hint: 'Immutable cryptographic ledger' },
+      { path: '/audit', label: 'Audit Logs', icon: '📜', hint: 'Immutable cryptographic ledger', minRole: 'ANALYST' },
+      { path: '/users', label: 'User Admin', icon: '👥', hint: 'Operator accounts & RBAC roles', minRole: 'ADMIN' },
     ],
   },
 ]
@@ -49,7 +52,13 @@ const NAV_SECTIONS: NavSection[] = [
 export function Layout() {
   const [seeding, setSeeding] = useState(false)
   const [seedNotice, setSeedNotice] = useState<string | null>(null)
+  const { user, logout, canApprove, hasMinRole } = useAuth()
   const navigate = useNavigate()
+
+  const handleSignOut = async () => {
+    await logout('manual')
+    navigate('/login', { replace: true })
+  }
 
   const handleGlobalSeedWorkload = async () => {
     setSeeding(true)
@@ -92,7 +101,7 @@ export function Layout() {
           </span>
         </div>
 
-        {/* Global Live Engine Badges */}
+        {/* Global Live Engine Badges & Authenticated Identity */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="badge badge-observed" title="Observes PostgreSQL telemetry via pg_stat_statements">
             <span>●</span> TELEMETRY ACTIVE
@@ -107,22 +116,67 @@ export function Layout() {
             <span>●</span> HUMAN GATE ACTIVE
           </span>
 
-          <button
-            onClick={handleGlobalSeedWorkload}
-            disabled={seeding}
-            className="btn btn-sm"
-            style={{
-              background: '#059669',
-              borderColor: '#047857',
-              color: '#fff',
-              fontSize: '11px',
-              fontWeight: 700,
-              marginLeft: '8px',
-            }}
-            title="Re-seed large enterprise workload with extended 7-day timeline and sandbox simulations"
-          >
-            {seeding ? '⚡ Seeding Workload...' : '⚡ Load Enterprise Workload'}
-          </button>
+          {canApprove && (
+            <button
+              onClick={handleGlobalSeedWorkload}
+              disabled={seeding}
+              className="btn btn-sm"
+              style={{
+                background: '#059669',
+                borderColor: '#047857',
+                color: '#fff',
+                fontSize: '11px',
+                fontWeight: 700,
+                marginLeft: '4px',
+              }}
+              title="Re-seed large enterprise workload with extended 7-day timeline and sandbox simulations"
+            >
+              {seeding ? '⚡ Seeding Workload...' : '⚡ Load Enterprise Workload'}
+            </button>
+          )}
+
+          {user && (
+            <div
+              data-testid="authenticated-identity"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#0f172a',
+                border: '1px solid #334155',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '11px',
+                color: '#e2e8f0',
+                marginLeft: '4px',
+              }}
+            >
+              <span>👤 <strong>{user.username}</strong></span>
+              <span
+                className="badge"
+                style={{
+                  background: '#1e293b',
+                  color: '#38bdf8',
+                  fontSize: '10px',
+                  padding: '1px 6px',
+                }}
+              >
+                {user.role}
+              </span>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="btn btn-secondary btn-sm"
+                style={{
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  marginLeft: '4px',
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -178,33 +232,35 @@ export function Layout() {
               {sec.title}
             </span>
 
-            {sec.items.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                end={item.path === '/'}
-                title={item.hint}
-                className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                style={({ isActive }) => ({
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: isActive ? 700 : 500,
-                  color: isActive ? '#38bdf8' : '#cbd5e1',
-                  background: isActive ? '#1e293b' : 'transparent',
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  border: isActive ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
-                  transition: 'all 0.15s ease',
-                })}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
+            {sec.items
+              .filter((item) => !item.minRole || hasMinRole(item.minRole))
+              .map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === '/'}
+                  title={item.hint}
+                  className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+                  style={({ isActive }) => ({
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: isActive ? 700 : 500,
+                    color: isActive ? '#38bdf8' : '#cbd5e1',
+                    background: isActive ? '#1e293b' : 'transparent',
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    border: isActive ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
+                    transition: 'all 0.15s ease',
+                  })}
+                >
+                  <span>{item.icon}</span>
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
 
             {idx < NAV_SECTIONS.length - 1 && (
               <span style={{ color: '#1e293b', margin: '0 4px', fontSize: '14px' }}>|</span>

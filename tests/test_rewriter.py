@@ -155,12 +155,30 @@ def test_safety_rejects_ddl():
         assert "Non-SELECT or DML statement detected" in reason or "Invalid SQL" in reason
 
 
+def test_ast_left_join_preserved_on_anti_join_is_null():
+    transformer = SQLASTTransformer()
+    sql = "SELECT c.id FROM customers c LEFT JOIN orders o ON c.id = o.customer_id WHERE o.id IS NULL"
+    transformed, applied, diff, reason, benefit = transformer.transform(sql)
+    assert applied == TransformationType.NO_OP
+    assert "LEFT JOIN" in transformed.upper()
+
+
+def test_ast_distinct_preserved_when_group_by_not_fully_projected():
+    transformer = SQLASTTransformer()
+    sql = "SELECT DISTINCT status FROM orders GROUP BY customer_id, status"
+    transformed, applied, diff, reason, benefit = transformer.transform(sql)
+    assert applied == TransformationType.NO_OP
+    assert "DISTINCT" in transformed.upper()
+
+
 def test_safety_rejects_volatile_and_nondeterministic_functions():
     policy = SQLRewriteSafetyPolicy()
     for volatile_query in [
         "SELECT id, random() FROM orders",
         "SELECT id, clock_timestamp() FROM orders",
         "SELECT id, txid_current() FROM orders",
+        "SELECT pg_sleep(5)",
+        "SELECT pg_read_file('/etc/passwd')",
     ]:
         safe, reason = policy.check_query_safety(volatile_query)
         assert safe is False
@@ -305,36 +323,79 @@ def test_rl_environment_rewrite_query_action():
 # 7. FastAPI Endpoint Verification
 # =========================================================================
 
-def test_api_rewrite_endpoint():
-    client = TestClient(app)
-    req_body = {
-        "sql": "SELECT id, price FROM products WHERE category = 'books' OR category = 'music'",
-        "validate_sandbox": False,
-    }
-    resp = client.post("/api/v1/rewriter/rewrite", json=req_body)
-    assert resp.status_code == 200
+def _with_isolated_db():
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.db.base import Base
 
-    data = resp.json()
-    assert data["original_query"] == req_body["sql"]
-    assert "IN ('books', 'music')" in data["rewritten_query"]
-    assert data["transformation"] == TransformationType.OR_TO_IN_LIST.value
-    assert len(data["reason"]) > 0
-    assert len(data["expected_benefit"]) > 0
-    assert data["confidence"] > 0.0
-    assert data["validation_status"] == ValidationStatus.PENDING.value
-    assert data["production_modified"] is False
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)()
+
+
+def test_api_rewrite_endpoint():
+    from app.core.security import Role, get_security_manager
+    from app.db.session import get_db
+
+    session = _with_isolated_db()
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        client = TestClient(app)
+        token = get_security_manager().create_token("2", "analyst_user", Role.ANALYST)
+        req_body = {
+            "sql": "SELECT id, price FROM products WHERE category = 'books' OR category = 'music'",
+            "validate_sandbox": False,
+        }
+        resp = client.post(
+            "/api/v1/rewriter/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json=req_body,
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data["original_query"] == req_body["sql"]
+        assert "IN ('books', 'music')" in data["rewritten_query"]
+        assert data["transformation"] == TransformationType.OR_TO_IN_LIST.value
+        assert len(data["reason"]) > 0
+        assert len(data["expected_benefit"]) > 0
+        assert data["confidence"] > 0.0
+        assert data["validation_status"] == ValidationStatus.PENDING.value
+        assert data["production_modified"] is False
+    finally:
+        app.dependency_overrides.clear()
+        session.close()
 
 
 def test_api_rewrite_endpoint_rejects_unsafe():
-    client = TestClient(app)
-    req_body = {
-        "sql": "DROP TABLE accounts;",
-        "validate_sandbox": False,
-    }
-    resp = client.post("/api/v1/rewriter/rewrite", json=req_body)
-    assert resp.status_code == 200
+    from app.core.security import Role, get_security_manager
+    from app.db.session import get_db
 
-    data = resp.json()
-    assert data["validation_status"] == ValidationStatus.UNSAFE_REJECTED.value
-    assert data["safety_verdict"] == "unsafe"
-    assert data["production_modified"] is False
+    session = _with_isolated_db()
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        client = TestClient(app)
+        token = get_security_manager().create_token("2", "analyst_user", Role.ANALYST)
+        req_body = {
+            "sql": "DROP TABLE accounts;",
+            "validate_sandbox": False,
+        }
+        resp = client.post(
+            "/api/v1/rewriter/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json=req_body,
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data["validation_status"] == ValidationStatus.UNSAFE_REJECTED.value
+        assert data["safety_verdict"] == "unsafe"
+        assert data["production_modified"] is False
+    finally:
+        app.dependency_overrides.clear()
+        session.close()
+

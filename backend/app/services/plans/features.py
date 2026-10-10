@@ -33,12 +33,15 @@ def extract_features(graph: PlanGraph) -> PlanFeatureVector:
             high_loops += 1
         if n.rows_removed_by_filter > max(n.actual_rows or 0, 1) * 2:
             filters += 1
+    seq_scans_count = counts({"Seq Scan", "Parallel Seq Scan"})
+    root_node = graph.nodes.get(graph.root_id)
+    total_rows = int(root_node.plan_rows) if root_node else int(sum(n.plan_rows for n in nodes))
     return PlanFeatureVector(
         node_count=len(nodes),
         total_cost=sum(n.total_cost for n in nodes),
         total_actual_time_ms=total_actual,
         max_depth=_depth(graph, graph.root_id, {}),
-        seq_scans=counts({"Seq Scan", "Parallel Seq Scan"}),
+        seq_scans=seq_scans_count,
         index_scans=counts({"Index Scan", "Index Only Scan", "Parallel Index Scan"}),
         bitmap_scans=counts({"Bitmap Heap Scan", "Bitmap Index Scan"}),
         nested_loops=counts({"Nested Loop", "Nested Loop Left Join", "Nested Loop Semi Join", "Nested Loop Anti Join"}),
@@ -51,4 +54,6 @@ def extract_features(graph: PlanGraph) -> PlanFeatureVector:
         high_loop_nodes=high_loops,
         expensive_nodes=expensive,
         filtering_inefficiencies=filters,
+        total_rows=total_rows,
+        seq_scan_fraction=round(seq_scans_count / max(1, len(nodes)), 4),
     )

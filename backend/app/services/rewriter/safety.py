@@ -28,6 +28,19 @@ _VOLATILE_FUNCTIONS = {
     "txid_current",
     "txid_current_snapshot",
     "pg_backend_pid",
+    "pg_sleep",
+    "pg_sleep_for",
+    "pg_sleep_until",
+    "dblink",
+    "dblink_exec",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_stat_file",
+    "pg_ls_dir",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
+    "lo_import",
+    "lo_export",
 }
 
 

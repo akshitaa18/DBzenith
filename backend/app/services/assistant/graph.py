@@ -311,25 +311,36 @@ def create_dba_assistant_graph(db: Session, user_role: UserRole | str = UserRole
         if intent == "request_approval" or "recommendation_id" in entities:
             rec_id = entities.get("recommendation_id") or (recs[0]["id"] if recs else None)
             if rec_id:
-                app_res = tools.request_migration_approval(
-                    recommendation_id=rec_id,
-                    reason="Requested via Conversational DBA Assistant after sandbox simulation validation.",
-                )
-                state["approval_request"] = app_res
-                audit.log_event(
-                    session_id=session_id,
-                    event_type="request_migration_approval",
-                    input_payload={"recommendation_id": rec_id},
-                    output_summary="Created pending approval request for human DBA review.",
-                )
+                try:
+                    app_res = tools.request_migration_approval(
+                        recommendation_id=rec_id,
+                        reason="Requested via Conversational DBA Assistant after sandbox simulation validation.",
+                    )
+                    state["approval_request"] = app_res
+                    audit.log_event(
+                        session_id=session_id,
+                        event_type="request_migration_approval",
+                        input_payload={"recommendation_id": rec_id},
+                        output_summary="Created pending approval request for human DBA review.",
+                    )
 
-                # Append approval banner
-                approval_notice = (
-                    f"\n\n---\n**Migration Approval Status**:\n"
-                    f"A formal approval request has been staged for Recommendation #{rec_id} (Status: `pending_dba_review`).\n"
-                    f"*Strict Safety Invariant*: The AI assistant cannot self-approve or apply changes directly. Please review and approve in the Dashboard."
-                )
-                state["final_response"] = (state.get("final_response") or "") + approval_notice
+                    # Append approval banner
+                    approval_notice = (
+                        f"\n\n---\n**Migration Approval Status**:\n"
+                        f"A formal approval request has been staged for Recommendation #{rec_id} (Status: `pending_dba_review`).\n"
+                        f"*Strict Safety Invariant*: The AI assistant cannot self-approve or apply changes directly. Please review and approve in the Dashboard."
+                    )
+                    state["final_response"] = (state.get("final_response") or "") + approval_notice
+                except SecurityViolationError as exc:
+                    state["approval_request"] = None
+                    audit.log_event(
+                        session_id=session_id,
+                        event_type="request_migration_approval",
+                        input_payload={"recommendation_id": rec_id},
+                        output_summary=str(exc),
+                        authorized=False,
+                        security_flag="insufficient_role_for_migration_approval",
+                    )
 
         return state
 

@@ -17,17 +17,33 @@ DBZenith enforces three non-negotiable operational invariants across all autonom
 - **Signature Verification**: Verified in constant time via `hmac.compare_digest` to prevent timing attacks.
 - **Password Storage**: PBKDF2-HMAC-SHA256 with 200,000 iterations and per-user 16-byte cryptographically random hex salts.
 
-### Role Hierarchy
-- `VIEWER` (Weight 10): Read-only access to overview telemetry, slow queries, and workload summaries.
-- `ANALYST` (Weight 20): Execution plan analysis, GNN feature inspections, and safe SQL rewrite evaluations.
-- `DBA` (Weight 30): Sandbox simulation execution, recommendation approval, and migration sign-off.
-- `ADMIN` (Weight 40): Operator account creation, role assignment, and administrative audit inspection.
+### Intentionally Public Routes
+Only the following four endpoints are intentionally accessible without an authenticated token or session cookie:
+- `GET /api/v1/health`: Lightweight container liveness probe.
+- `GET /api/v1/ready`: Database connectivity readiness probe (returns `503` if PostgreSQL is unreachable).
+- `POST /api/v1/auth/login`: Operator credential exchange for a signed token / `HttpOnly` session cookie.
+- `POST /api/v1/auth/logout`: Clears the `dbzenith_session` cookie.
+
+All other API endpoints require a verified, unexpired token belonging to an active `User` record.
+
+### Role Hierarchy & Authorization Matrix
+- `VIEWER` (Weight 10): Read-only access to overview telemetry, slow queries, query execution plan inspection, recommendation list/detail/trace, simulation history, RL status, and read-only assistant queries.
+- `ANALYST` (Weight 20): Inherits `VIEWER` plus telemetry collection/seeding, execution plan analysis (`EXPLAIN`), batch optimization calculation, HypoPG sandbox simulation execution, SQL rewrite analysis, RL optimization triggers, and audit log reads (`/audit`, `/recommendations/audit/events`, `/assistant/audit/all`).
+- `DBA` (Weight 30): Inherits `ANALYST` plus recommendation approval (`POST /recommendations/{id}/approve`), recommendation rejection (`POST /recommendations/{id}/reject`), assistant migration approval tools (`request_migration_approval`), and database runtime telemetry configuration (`GET/PATCH /config/database`).
+- `ADMIN` (Weight 40): Inherits `DBA` plus operator account administration (`GET /auth/users`, `POST /auth/users`, `PATCH /auth/users/{id}`).
 
 ```text
-[VIEWER]   --> /health, /queries, /workload
-[ANALYST]  --> /plans/analyze, /rewriter/rewrite
-[DBA]      --> /simulations, /recommendations/{id}/approve, /recommendations/{id}/reject
-[ADMIN]    --> /auth/users, full administrative control
+[Public]   --> GET /health, GET /ready, POST /auth/login, POST /auth/logout
+[VIEWER]   --> GET /auth/me, GET /workload/*, GET /queries/*, GET /plans/{id},
+               GET /recommendations, GET /recommendations/{id}, GET /recommendations/{id}/trace,
+               GET /simulations, GET /simulations/{id}, GET /rl/status,
+               POST /assistant/chat (read-only tools), GET /assistant/history/{id}, GET /assistant/tools
+[ANALYST]  --> POST /workload/collect, POST /workload/seed-demo, POST /queries/calculate-optimizations,
+               POST /plans/analyze, POST /simulations, POST /rewriter/rewrite, POST /rl/optimize,
+               GET /audit, GET /recommendations/audit/events, GET /assistant/audit/all
+[DBA]      --> POST /recommendations/{id}/approve, POST /recommendations/{id}/reject,
+               GET /config/database, PATCH /config/database
+[ADMIN]    --> GET /auth/users, POST /auth/users, PATCH /auth/users/{id}
 ```
 
 ---
@@ -80,7 +96,7 @@ Incoming SQL / Plan
    - Sandbox databases operate on an isolated internal network without ingress access to the production database network.
 3. **Prompt Injection & Tool Abuse Defenses**:
    - `AssistantSafetyPolicy` inspects incoming conversational prompts for instruction overrides (`ignore prior instructions`, `developer mode`, `dan mode`, `print system prompt`, `repeat words above`).
-   - `ToolAuthorizer` gates each of the 10 assistant tools against the user's role; non-DBA roles cannot trigger `request_migration_approval`.
+   - `ToolAuthorizer` gates each of the 10 assistant tools against the user's verified token role; non-DBA roles cannot trigger `request_migration_approval`.
 
 ---
 
@@ -95,4 +111,20 @@ All critical actions are logged to `security_audit_events` with IP address, user
 - `AI_BOUNDARY`: Sanitization decisions and security rejection alerts.
 - `AGENT_ACTION`: Tool calls and conversational turns.
 
-The ledger is accessible via `GET /api/v1/audit`.
+The ledger is accessible via `GET /api/v1/audit` (`ANALYST` role or higher).
+
+---
+
+## Automated Security & API Regression Suite
+
+Run the deterministic backend security and API contract regression suite (using an isolated in-memory SQLite database so no production or local PostgreSQL database is touched):
+
+```bash
+python -m pytest tests/test_security.py -v
+```
+
+Run the full backend unit and regression test suite:
+
+```bash
+python -m pytest -v
+```

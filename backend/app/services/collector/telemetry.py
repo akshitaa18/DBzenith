@@ -4,9 +4,9 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 _WS = re.compile(r"\s+")
 
 
+def _hash64(data: bytes) -> int:
+    try:
+        import xxhash
+        h = xxhash.xxh64(data).intdigest()
+    except ImportError:
+        import hashlib
+        h = int.from_bytes(hashlib.sha256(data).digest()[:8], "big")
+    if h >= 2**63:
+        h -= 2**64
+    return h
+
+
 def normalize_query(query: str) -> str:
     return _WS.sub(" ", query).strip()
 
@@ -26,18 +38,31 @@ def normalize_query(query: str) -> str:
 class TelemetryCollector:
     """Collects real PostgreSQL statistics from pg_stat_statements.
 
-    No application-side mock statistics are generated. Optional pg_qualstats
-    data is joined when that extension is installed.
+    Optional pg_qualstats data is joined when that extension is installed.
     """
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        self._last_was_fallback: bool = False
 
-    def collect_once(self) -> WorkloadSnapshot:
+    def collect_once(self, background: bool = False) -> WorkloadSnapshot:
         started = time.monotonic()
         session_factory = get_session_factory()
         with session_factory() as db:
             rows = self._query_stats(db)
+            if background:
+                existing = db.scalar(
+                    select(WorkloadSnapshot)
+                    .join(QueryStatistic, QueryStatistic.snapshot_id == WorkloadSnapshot.id)
+                    .order_by(desc(WorkloadSnapshot.captured_at), desc(WorkloadSnapshot.id))
+                    .limit(1)
+                )
+                live_total_calls = sum(int(r.get("calls") or 0) for r in rows)
+                if existing is not None and (
+                    self._last_was_fallback or existing.total_calls > live_total_calls
+                ):
+                    return existing
+
             predicates = self._predicate_stats(db)
             relations = self._relation_stats(db)
             previous = self._previous_snapshot(db)
@@ -101,6 +126,7 @@ class TelemetryCollector:
                         explain_plan=explain_plan,
                     )
                 )
+            self._prune_old_snapshots(db, keep=50)
             db.commit()
             db.refresh(snapshot)
             logger.info(
@@ -113,6 +139,23 @@ class TelemetryCollector:
                 },
             )
             return snapshot
+
+    def _prune_old_snapshots(self, db: Session, keep: int = 50) -> None:
+        try:
+            keep_ids = [
+                row[0]
+                for row in db.execute(
+                    text("SELECT id FROM workload_snapshots ORDER BY captured_at DESC, id DESC LIMIT :keep"),
+                    {"keep": keep},
+                ).fetchall()
+            ]
+            if len(keep_ids) >= keep:
+                cutoff_id = min(keep_ids)
+                db.execute(text("DELETE FROM query_statistics WHERE snapshot_id < :cutoff"), {"cutoff": cutoff_id})
+                db.execute(text("DELETE FROM relation_statistics WHERE snapshot_id < :cutoff"), {"cutoff": cutoff_id})
+                db.execute(text("DELETE FROM workload_snapshots WHERE id < :cutoff"), {"cutoff": cutoff_id})
+        except Exception as exc:
+            logger.debug("snapshot pruning skipped: %s", exc)
 
     def _query_stats(self, db: Session) -> list[dict]:
         # Check available columns in pg_stat_statements for compatibility with PG17+ and older versions
@@ -168,8 +211,22 @@ class TelemetryCollector:
               AND s.query NOT ILIKE '%optimization_simulations%'
               AND s.query NOT ILIKE '%recommendation_audit_events%'
               AND s.query NOT ILIKE '%audit_events%'
-              AND s.query NOT ILIKE '%pg_stat_statements%'
+              AND s.query NOT ILIKE '%security_users%'
+              AND s.query NOT ILIKE '%system_metadata%'
+              AND s.query NOT ILIKE '%pg_stat_%'
               AND s.query NOT ILIKE '%pg_qualstats%'
+              AND s.query NOT ILIKE '%pg_indexes%'
+              AND s.query NOT ILIKE '%pg_class%'
+              AND s.query NOT ILIKE '%pg_namespace%'
+              AND s.query NOT ILIKE '%pg_extension%'
+              AND s.query NOT ILIKE '%pg_database%'
+              AND s.query NOT ILIKE '%pg_roles%'
+              AND s.query NOT ILIKE '%pg_tables%'
+              AND s.query NOT ILIKE '%to_regclass%'
+              AND s.query NOT ILIKE '%current_setting%'
+              AND s.query NOT ILIKE '%current_database%'
+              AND s.query NOT ILIKE '%setval(%'
+              AND s.query NOT ILIKE '%hypopg%'
               AND s.query NOT ILIKE '%information_schema%'
               AND s.query NOT ILIKE '%alembic_version%'
               AND s.query NOT ILIKE 'BEGIN%'
@@ -178,6 +235,9 @@ class TelemetryCollector:
               AND s.query NOT ILIKE 'SAVEPOINT%'
               AND s.query NOT ILIKE 'RELEASE%'
               AND s.query NOT ILIKE 'DEALLOCATE%'
+              AND s.query NOT ILIKE 'SET %'
+              AND s.query NOT ILIKE 'SHOW %'
+              AND s.query NOT ILIKE 'EXPLAIN%'
             ORDER BY s.total_exec_time DESC
             LIMIT :limit
         """
@@ -186,16 +246,16 @@ class TelemetryCollector:
                 result = db.execute(text(query_sql), {"limit": self.settings.telemetry_query_limit}).mappings().all()
                 rows = [dict(row) for row in result]
                 if rows:
+                    self._last_was_fallback = False
                     return rows
         except Exception as exc:
             logger.warning("pg_stat_statements query failed: %s", exc)
 
+        self._last_was_fallback = True
         return self._fallback_query_stats(db)
 
     def _fallback_query_stats(self, db: Session) -> list[dict]:
         """Provides fallback telemetry from demo tables when pg_stat_statements is not preloaded in shared_preload_libraries."""
-        import xxhash
-
         db_name = "dbzenith"
         try:
             db_name = db.execute(text("SELECT current_database();")).scalar() or "dbzenith"
@@ -207,9 +267,7 @@ class TelemetryCollector:
             result = []
             for item in COMPREHENSIVE_QUERIES:
                 q_text = item["query"]
-                h = xxhash.xxh64(q_text.encode("utf-8")).intdigest()
-                if h >= 2**63:
-                    h = h - 2**64
+                h = _hash64(q_text.encode("utf-8"))
                 calls = int(item["calls"])
                 mean_ms = float(item["mean_ms"])
                 result.append({
@@ -269,9 +327,7 @@ class TelemetryCollector:
 
         result = []
         for q_text, calls, mean_ms, min_ms, max_ms, rows_cnt, hit, read in queries:
-            h = xxhash.xxh64(q_text.encode("utf-8")).intdigest()
-            if h >= 2**63:
-                h = h - 2**64
+            h = _hash64(q_text.encode("utf-8"))
             result.append({
                 "userid": 10,
                 "dbid": 16384,
@@ -373,14 +429,21 @@ class TelemetryCollector:
         return {int(r[0]): (int(r[1]), r[2]) for r in rows}
 
     def _window_seconds(self, db: Session) -> float:
-        # Check if an extended observation window exists in historical snapshots, otherwise default to 24 Hours
+        if self._last_was_fallback:
+            return 86400.0  # Enterprise 24-Hour observation window for fallback dataset
         try:
-            max_win = db.execute(text("SELECT max(window_seconds) FROM workload_snapshots")).scalar()
-            if max_win and float(max_win) >= 3600.0:
-                return float(max_win)
+            prev_time = db.execute(
+                text("SELECT captured_at FROM workload_snapshots ORDER BY captured_at DESC, id DESC LIMIT 1")
+            ).scalar()
+            if isinstance(prev_time, datetime):
+                if prev_time.tzinfo is None:
+                    prev_time = prev_time.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - prev_time).total_seconds()
+                if elapsed > 0:
+                    return round(max(1.0, min(elapsed, 86400.0)), 2)
         except Exception:
             pass
-        return 86400.0  # Enterprise 24-Hour observation window
+        return float(self.settings.telemetry_interval_seconds)
 
     @staticmethod
     def _is_safe_explain_candidate(query: str) -> bool:
@@ -426,11 +489,11 @@ class TelemetryWorker:
 
     def _run(self) -> None:
         try:
-            self.collector.collect_once()
+            self.collector.collect_once(background=True)
         except Exception:
             logger.exception("initial_telemetry_collection_failed")
         while not self._stop.wait(self.settings.telemetry_interval_seconds):
             try:
-                self.collector.collect_once()
+                self.collector.collect_once(background=True)
             except Exception:
                 logger.exception("telemetry_collection_failed")

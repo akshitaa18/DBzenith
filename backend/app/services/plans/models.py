@@ -53,6 +53,8 @@ class PlanFeatureVector:
     high_loop_nodes: int
     expensive_nodes: int
     filtering_inefficiencies: int
+    total_rows: int = 0
+    seq_scan_fraction: float = 0.0
 
 
 @dataclass(frozen=True)

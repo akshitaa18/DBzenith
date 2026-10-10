@@ -106,10 +106,17 @@ class RLInferenceService:
             and recommendation.requires_approval
         )
 
+        conf = float(recommendation.metadata.get("confidence", round(max(0.5, 1.0 - recommendation.risk_score * 0.5), 2)))
         return {
             "policy_used": policy_used,
+            "policy_version": self._model_metadata.get("version", "v0.8.0-dqn"),
+            "model_type": self._model_metadata.get("model_type", "TrainableDQN" if self._agent else "BaselineHeuristicFallback"),
             "action_type": action.name,
             "action_code": int(action),
+            "confidence": conf,
+            "predicted_reward": round(reward_breakdown.net_reward, 4),
+            "simulated_cost_reduction_pct": round(measured_result.latency_improvement_pct, 2),
+            "explanation": recommendation.reason,
             "recommendation": recommendation.model_dump(),
             "sandbox_measured_result": measured_result.model_dump(),
             "reward_breakdown": reward_breakdown.model_dump(),

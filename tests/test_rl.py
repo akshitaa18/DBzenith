@@ -253,16 +253,20 @@ def test_pipeline_training_and_comparison():
 
 def test_rl_api_routes():
     from fastapi.testclient import TestClient
+    from app.core.security import Role, get_security_manager
     from app.main import app
 
     client = TestClient(app)
-    status_resp = client.get("/api/v1/rl/status")
+    token = get_security_manager().create_token("2", "analyst_user", Role.ANALYST)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    status_resp = client.get("/api/v1/rl/status", headers=headers)
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["status"] == "ready"
     assert "actions_supported" in status_data
 
-    optimize_resp = client.post("/api/v1/rl/optimize", json={})
+    optimize_resp = client.post("/api/v1/rl/optimize", headers=headers, json={})
     assert optimize_resp.status_code == 200
     optimize_data = optimize_resp.json()
     assert "action_type" in optimize_data
@@ -270,3 +274,4 @@ def test_rl_api_routes():
     assert "sandbox_measured_result" in optimize_data
     assert "reward_breakdown" in optimize_data
     assert optimize_data["production_modified"] is False
+

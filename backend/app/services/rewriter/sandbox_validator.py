@@ -28,12 +28,17 @@ class SandboxRewriteValidator:
 
     def _get_engine(self):
         if self._engine is None:
-            self._engine = create_engine(
-                self.sandbox_db_url,
-                pool_pre_ping=False,
-                future=True,
-                connect_args={"connect_timeout": 1},
-            )
+            from app.db.session import get_sandbox_engine
+            settings = get_settings()
+            if self.sandbox_db_url == settings.sandbox_database_url:
+                self._engine = get_sandbox_engine()
+            else:
+                self._engine = create_engine(
+                    self.sandbox_db_url,
+                    pool_pre_ping=False,
+                    future=True,
+                    connect_args={"connect_timeout": 1},
+                )
         return self._engine
 
     def validate_rewrite(
@@ -94,6 +99,11 @@ class SandboxRewriteValidator:
 
         try:
             with engine.connect() as conn:
+                try:
+                    conn.execute(text("SET statement_timeout = '3000ms'"))
+                    conn.execute(text("SET default_transaction_read_only = on"))
+                except Exception:
+                    pass
                 # 1. Cost analysis via EXPLAIN (FORMAT JSON)
                 try:
                     orig_explain = conn.execute(text(f"EXPLAIN (FORMAT JSON) {orig_sql}")).scalar()

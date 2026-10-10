@@ -149,14 +149,23 @@ class SQLASTTransformer:
         if not where:
             return new_ast, False, None
 
-        where_cols = {col.table.lower() for col in where.find_all(exp.Column) if col.table}
+        # If WHERE contains OR, IS NULL, or COALESCE, do not convert LEFT JOIN blindly
+        if where.find(exp.Or) or where.find(exp.Is) or where.find(exp.Coalesce):
+            return new_ast, False, None
+
+        strict_pred_types = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.In)
+        null_rejecting_tables: set[str] = set()
+        for pred in where.find_all(*strict_pred_types):
+            for col in pred.find_all(exp.Column):
+                if col.table:
+                    null_rejecting_tables.add(col.table.lower())
 
         for join in new_ast.find_all(exp.Join):
             # Check if this is a LEFT join
             side = join.args.get("side")
             if side and side.upper() == "LEFT":
                 table_alias = (join.this.alias or join.this.name).lower()
-                if table_alias in where_cols:
+                if table_alias in null_rejecting_tables:
                     join.set("side", None)  # Strips LEFT -> becomes standard INNER JOIN
                     transformed = True
                     diff_note = f"Converted LEFT JOIN on '{table_alias}' to INNER JOIN due to null-rejecting WHERE predicate."
@@ -166,7 +175,7 @@ class SQLASTTransformer:
 
     @classmethod
     def transform_redundant_distinct(cls, ast: exp.Expression) -> tuple[exp.Expression, bool, str | None]:
-        """Eliminates redundant DISTINCT when query already has GROUP BY on the same projection.
+        """Eliminates redundant DISTINCT when query already has GROUP BY and all GROUP BY keys are projected.
 
         Example:
             SELECT DISTINCT c.id, COUNT(o.id) FROM customers c JOIN orders o ON c.id = o.customer_id GROUP BY c.id
@@ -179,10 +188,18 @@ class SQLASTTransformer:
         diff_note = None
         new_ast = ast.copy()
 
-        if new_ast.args.get("distinct") and new_ast.args.get("group"):
-            new_ast.set("distinct", None)
-            transformed = True
-            diff_note = "Eliminated redundant DISTINCT on aggregated query with matching GROUP BY."
+        group = new_ast.args.get("group")
+        if new_ast.args.get("distinct") and group:
+            group_exprs = {g.sql(dialect="postgres").lower() for g in group.expressions}
+            select_cols = {
+                c.sql(dialect="postgres").lower()
+                for s in new_ast.expressions
+                for c in ([s.this] if isinstance(s, exp.Alias) else [s])
+            }
+            if group_exprs and group_exprs.issubset(select_cols):
+                new_ast.set("distinct", None)
+                transformed = True
+                diff_note = "Eliminated redundant DISTINCT on aggregated query with matching GROUP BY."
 
         return new_ast, transformed, diff_note
 

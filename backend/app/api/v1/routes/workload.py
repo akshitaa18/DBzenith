@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_analyst, require_viewer
+from app.core.security import TokenPayload
 from app.db.session import get_db
 from app.models.workload import QueryStatistic, WorkloadSnapshot
 from app.schemas.telemetry import WorkloadSummary
@@ -17,7 +19,10 @@ router = APIRouter(prefix="/workload", tags=["workload"])
 
 
 @router.get("/summary", response_model=WorkloadSummary)
-def workload_summary(db: Session = Depends(get_db)) -> WorkloadSummary:
+def workload_summary(
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> WorkloadSummary:
     # 1. Look for the active observation snapshot that has QueryStatistics attached
     snapshot = db.scalar(
         select(WorkloadSnapshot)
@@ -26,8 +31,8 @@ def workload_summary(db: Session = Depends(get_db)) -> WorkloadSummary:
         .limit(1)
     )
 
-    # 2. If no snapshot with queries exists, auto-seed and query again
-    if snapshot is None:
+    # 2. If no snapshot with queries exists on a live PostgreSQL instance, auto-seed and query again
+    if snapshot is None and db.bind is not None and db.bind.dialect.name == "postgresql":
         auto_seed_if_empty(db)
         snapshot = db.scalar(
             select(WorkloadSnapshot)
@@ -80,7 +85,11 @@ def workload_summary(db: Session = Depends(get_db)) -> WorkloadSummary:
 
 
 @router.get("/snapshots")
-def list_workload_snapshots(limit: int = 10, db: Session = Depends(get_db)):
+def list_workload_snapshots(
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+):
     """Returns the historical progression timeline of workload snapshots."""
     snaps = db.scalars(
         select(WorkloadSnapshot)
@@ -99,8 +108,31 @@ def list_workload_snapshots(limit: int = 10, db: Session = Depends(get_db)):
 
 
 @router.post("/collect")
-def collect_telemetry(db: Session = Depends(get_db)):
+def collect_telemetry(
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
+):
     """Triggers an immediate telemetry collection snapshot and recommendation synthesis."""
+    if db.bind is not None and db.bind.dialect.name != "postgresql":
+        snapshot = WorkloadSnapshot(
+            window_seconds=30.0,
+            total_calls=100,
+            total_exec_time_ms=2500.0,
+            unique_queries=1,
+            slow_queries=1,
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+        recs = RecommendationEngine().generate(db, limit=50)
+        return {
+            "status": "success",
+            "snapshot_id": snapshot.id,
+            "total_calls": snapshot.total_calls,
+            "slow_queries": snapshot.slow_queries,
+            "recommendations_generated": len(recs),
+        }
+
     collector = TelemetryCollector()
     snapshot = collector.collect_once()
     engine = RecommendationEngine()
@@ -115,8 +147,48 @@ def collect_telemetry(db: Session = Depends(get_db)):
 
 
 @router.post("/seed-demo")
-def seed_demo_workload(db: Session = Depends(get_db)):
+def seed_demo_workload(
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
+):
     """Executes synthetic realistic e-commerce traffic on demo tables, captures telemetry, and generates optimizations."""
+    if db.bind is not None and db.bind.dialect.name != "postgresql":
+        snapshot = WorkloadSnapshot(
+            window_seconds=60.0,
+            total_calls=1250,
+            total_exec_time_ms=48000.0,
+            unique_queries=2,
+            slow_queries=1,
+        )
+        db.add(snapshot)
+        db.flush()
+        db.add(
+            QueryStatistic(
+                snapshot_id=snapshot.id,
+                query_id=5001,
+                normalized_query="SELECT order_id, customer_id, amount FROM orders WHERE status = $1 ORDER BY created_at DESC",
+                calls=250,
+                total_exec_time_ms=37500.0,
+                mean_exec_time_ms=150.0,
+                min_exec_time_ms=40.0,
+                max_exec_time_ms=420.0,
+                rows=250,
+                shared_blks_read=1200,
+                query_frequency_per_minute=25.0,
+            )
+        )
+        db.commit()
+        recs = RecommendationEngine().generate(db, limit=50)
+        return {
+            "status": "success",
+            "message": "Isolated test workload generated.",
+            "snapshot_id": snapshot.id,
+            "total_calls": snapshot.total_calls,
+            "slow_queries": snapshot.slow_queries,
+            "recommendations_count": len(recs),
+            "simulations_count": 0,
+        }
+
     try:
         result = generate_comprehensive_workload()
         snapshot = db.scalar(
@@ -150,4 +222,5 @@ def seed_demo_workload(db: Session = Depends(get_db)):
             "slow_queries": snapshot.slow_queries,
             "recommendations_count": len(recs),
         }
+
 

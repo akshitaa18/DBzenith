@@ -105,12 +105,12 @@ export function SystemHealthPage() {
         <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontWeight: 600, color: '#f8fafc' }}>PostgreSQL Engine</span>
-            <span className={`badge ${readiness?.database === 'connected' ? 'badge-success' : 'badge-danger'}`}>
-              {readiness?.database ? readiness.database.toUpperCase() : 'UNKNOWN'}
+            <span className={`badge ${readiness?.database === 'ok' || readiness?.database === 'connected' ? 'badge-success' : 'badge-danger'}`}>
+              {readiness?.database ? (readiness.database === 'ok' ? 'CONNECTED' : readiness.database.toUpperCase()) : 'UNKNOWN'}
             </span>
           </div>
           <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-            Engine State: <strong>{readiness?.database === 'connected' ? 'Connected & Active' : 'Offline / Error'}</strong>
+            Engine State: <strong>{readiness?.database === 'ok' || readiness?.database === 'connected' ? 'Connected & Active' : 'Offline / Error'}</strong>
           </div>
           <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
             Overall Readiness: <strong>{readiness?.status || 'unknown'}</strong>

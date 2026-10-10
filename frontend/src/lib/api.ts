@@ -1,10 +1,129 @@
 const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
+export type UserRole = 'VIEWER' | 'ANALYST' | 'DBA' | 'ADMIN'
+
+export type AuthUser = {
+  id: number
+  username: string
+  email: string
+  role: UserRole
+}
+
+export type StoredSession = {
+  token: string
+  user: AuthUser
+  expiresAtMs: number
+}
+
+const TOKEN_KEY = 'dbzenith_token'
+const SESSION_KEY = 'dbzenith_session_meta'
+
+export function setAuthToken(token: string | null): void {
+  try {
+    if (typeof window === 'undefined') return
+    if (token) {
+      window.localStorage.setItem(TOKEN_KEY, token)
+    } else {
+      window.localStorage.removeItem(TOKEN_KEY)
+      window.localStorage.removeItem(SESSION_KEY)
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+export function setAuthSession(token: string, user: AuthUser, expiresInSeconds: number): void {
+  try {
+    if (typeof window === 'undefined') return
+    const expiresAtMs = Date.now() + Math.max(1, expiresInSeconds) * 1000
+    window.localStorage.setItem(TOKEN_KEY, token)
+    window.localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ token, user, expiresAtMs } satisfies StoredSession),
+    )
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+export function clearAuthSession(): void {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.removeItem(TOKEN_KEY)
+    window.localStorage.removeItem(SESSION_KEY)
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+export function getStoredSession(): { session: StoredSession | null; expired: boolean } {
+  try {
+    if (typeof window === 'undefined') return { session: null, expired: false }
+    const raw = window.localStorage.getItem(SESSION_KEY)
+    const token = window.localStorage.getItem(TOKEN_KEY)
+    if (!raw || !token) return { session: null, expired: false }
+    const parsed = JSON.parse(raw) as StoredSession
+    if (!parsed.expiresAtMs || Date.now() >= parsed.expiresAtMs) {
+      clearAuthSession()
+      return { session: null, expired: true }
+    }
+    return { session: { ...parsed, token }, expired: false }
+  } catch {
+    clearAuthSession()
+    return { session: null, expired: false }
+  }
+}
+
+function sanitizeErrorDetail(rawDetail: string, status: number): string {
+  const cleaned = rawDetail.split('\n')[0].trim()
+  // Never expose raw stack traces, SQLAlchemy URLs, or internal file paths
+  if (
+    /traceback|sqlalchemy|psycopg|file "|line \d+/i.test(cleaned) ||
+    cleaned.length > 220
+  ) {
+    if (status === 401) return 'Your session has expired or credentials are invalid. Please sign in again.'
+    if (status === 403) return 'You do not have permission to perform this action.'
+    if (status >= 500) return 'The backend service encountered an internal error. Please try again shortly.'
+    return 'The request could not be completed. Please check your input and try again.'
+  }
+  return cleaned
+}
+
+function getAuthHeaders(existing?: HeadersInit): HeadersInit {
+  const headers: Record<string, string> = {}
+  if (existing) {
+    if (existing instanceof Headers) {
+      existing.forEach((v, k) => { headers[k] = v })
+    } else if (Array.isArray(existing)) {
+      for (const [k, v] of existing) headers[k] = v
+    } else {
+      Object.assign(headers, existing)
+    }
+  }
+  try {
+    const { session, expired } = getStoredSession()
+    if (expired && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dbzenith:session-expired'))
+    }
+    const token = session?.token ?? (typeof window !== 'undefined' ? window.localStorage.getItem(TOKEN_KEY) : null)
+    if (token && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return headers
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${path}`
   let response: Response
   try {
-    response = await fetch(url, init)
+    response = await fetch(url, {
+      ...init,
+      credentials: 'include',
+      headers: getAuthHeaders(init?.headers),
+    })
   } catch {
     const origin = API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')
     throw new Error(
@@ -12,14 +131,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     )
   }
   if (!response.ok) {
-    let detail = ''
+    let rawDetail = ''
     try {
       const body = await response.json()
-      detail = typeof body?.detail === 'string' ? `: ${body.detail}` : ''
+      if (typeof body?.detail === 'string') {
+        rawDetail = body.detail
+      } else if (Array.isArray(body?.detail)) {
+        rawDetail = body.detail.map((d: any) => d?.msg || 'Invalid input').join('; ')
+      }
     } catch {
-      detail = ''
+      rawDetail = ''
     }
-    throw new Error(`API request failed: ${response.status}${detail}`)
+
+    if (response.status === 401 && !path.includes('/auth/login')) {
+      clearAuthSession()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('dbzenith:session-expired'))
+      }
+    }
+
+    const safeDetail = rawDetail ? `: ${sanitizeErrorDetail(rawDetail, response.status)}` : ''
+    throw new Error(`API request failed: ${response.status}${safeDetail}`)
   }
   return response.json()
 }
@@ -327,6 +459,25 @@ export function getRecommendationAuditEvents(): Promise<RecommendationAuditEvent
   return request('/api/v1/recommendations/audit/events')
 }
 
+export type SecurityAuditEvent = {
+  id: number
+  timestamp: string | null
+  event_category: string
+  action: string
+  actor_id: string | null
+  actor_username: string | null
+  actor_role: string | null
+  target_entity: string | null
+  target_id: string | null
+  status: string
+  ip_address: string | null
+  details: Record<string, unknown>
+}
+
+export function getSecurityAuditEvents(limit = 100): Promise<SecurityAuditEvent[]> {
+  return request(`/api/v1/audit?limit=${limit}`)
+}
+
 export type SQLRewriteResponse = {
   original_query: string
   rewritten_query: string
@@ -409,4 +560,80 @@ export function collectTelemetry(): Promise<{
   recommendations_generated: number
 }> {
   return request('/api/v1/workload/collect', { method: 'POST' })
+}
+
+export type ManagedUser = {
+  id: number
+  username: string
+  email: string
+  role: UserRole
+  is_active: boolean
+  created_at: string
+  last_login_at?: string | null
+}
+
+export async function loginUser(
+  username: string,
+  password: string,
+): Promise<{
+  access_token: string
+  token_type: string
+  expires_in_seconds: number
+  user: AuthUser
+}> {
+  const res = await request<{
+    access_token: string
+    token_type: string
+    expires_in_seconds: number
+    user: AuthUser
+  }>('/api/v1/auth/login', jsonBody({ username, password }))
+  if (res?.access_token && res?.user) {
+    setAuthSession(res.access_token, res.user, res.expires_in_seconds || 3600)
+  }
+  return res
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await request('/api/v1/auth/logout', { method: 'POST' })
+  } catch {
+    // Ensure client session is always cleared even if backend is unreachable
+  } finally {
+    clearAuthSession()
+  }
+}
+
+export function getCurrentUserProfile(): Promise<{
+  user_id: string
+  username: string
+  email: string
+  role: UserRole
+  issued_at: number
+  expires_at: number
+}> {
+  return request('/api/v1/auth/me')
+}
+
+export function listUsers(): Promise<ManagedUser[]> {
+  return request('/api/v1/auth/users')
+}
+
+export function createUser(payload: {
+  username: string
+  email: string
+  password: string
+  role: UserRole
+}): Promise<ManagedUser> {
+  return request('/api/v1/auth/users', jsonBody(payload))
+}
+
+export function updateUser(
+  userId: number,
+  payload: { role?: UserRole; is_active?: boolean },
+): Promise<ManagedUser> {
+  return request(`/api/v1/auth/users/${userId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
 }

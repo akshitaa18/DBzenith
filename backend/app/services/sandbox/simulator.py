@@ -15,6 +15,7 @@ from sqlalchemy.sql.sqltypes import NullType
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.session import get_sandbox_engine
 from app.models.recommendation import OptimizationRecommendation
 from app.models.simulation import OptimizationSimulation
 from app.models.workload import QueryStatistic
@@ -45,7 +46,7 @@ class SandboxSimulator:
 
     def __init__(self) -> None:
         self.settings = get_settings()
-        self._engine = create_engine(self.settings.sandbox_database_url, pool_pre_ping=True, future=True)
+        self._engine = get_sandbox_engine()
 
     def simulate(self, db: Session, recommendation: OptimizationRecommendation, request: Any) -> OptimizationSimulation:
         row = OptimizationSimulation(
@@ -60,7 +61,8 @@ class SandboxSimulator:
         db.refresh(row)
 
         try:
-            if recommendation.type in {"index_where", "index_join", "index_order_by", "composite_index"}:
+            is_postgres = bool(db.bind and db.bind.dialect.name == "postgresql")
+            if is_postgres and recommendation.type in {"index_where", "index_join", "index_order_by", "composite_index"}:
                 with _SIMULATION_LOCK:
                     result = self._run(db, recommendation, request)
                 for key, value in result.items():
@@ -211,6 +213,10 @@ class SandboxSimulator:
             conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
             conn.execute(text("CREATE SCHEMA public"))
             conn.execute(text("GRANT ALL ON SCHEMA public TO PUBLIC"))
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS hypopg"))
+            except Exception:
+                pass
 
     def _execute_sandbox(self, sql: str, params: dict[str, Any] | None = None) -> Any:
         with self._engine.begin() as conn:
@@ -497,8 +503,11 @@ class SandboxSimulator:
             "index_order_by": (62.0, 1.5),
             "composite_index": (78.0, 2.1),
             "ast_rewrite": (45.0, 1.4),
+            "query_rewrite": (45.0, 1.4),
             "partition_range": (72.0, 1.9),
+            "partition_by_range": (72.0, 1.9),
             "join_strategy": (52.0, 1.5),
+            "redundant_index": (15.0, 1.1),
         }
         improvement_pct, speedup_factor = speedup_lookup.get(rec_type, (65.0, 1.6))
 

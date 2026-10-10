@@ -38,17 +38,19 @@ export function PlanViewer() {
     const qid = searchParams.get('queryId')
     const sqlParam = searchParams.get('sql')
     if (qid) {
+      setLoading(true)
+      setError(null)
       getQueryDetail(qid)
         .then((q) => {
           if (q.normalized_query) {
-            const clean = q.normalized_query.replace(/;\s*$/, '')
-            setSql(clean)
-            handleAnalyze(clean)
+            setSql(q.normalized_query.replace(/;\s*$/, ''))
           }
         })
-        .catch(() => {
-          handleAnalyze()
-        })
+        .catch(() => {})
+      analyzePlan({ query_id: qid })
+        .then((res) => setAnalysis(res))
+        .catch(() => handleAnalyze())
+        .finally(() => setLoading(false))
     } else if (sqlParam) {
       const clean = sqlParam.replace(/;\s*$/, '')
       setSql(clean)
@@ -74,7 +76,7 @@ export function PlanViewer() {
 
   const handleApplyRewritten = (newSql: string) => {
     setSql(newSql)
-    handleAnalyze()
+    handleAnalyze(newSql)
   }
 
   return (

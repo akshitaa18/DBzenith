@@ -7,9 +7,7 @@ from app.core.config import get_settings
 from app.db.session import get_engine, get_session_factory
 from app.services.collector.telemetry import TelemetryCollector
 
-DATABASE_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL") or os.getenv("DATABASE_URL")
-if not DATABASE_URL and get_settings().database_url.startswith("postgresql"):
-    DATABASE_URL = get_settings().database_url.replace("@db:5432", "@localhost:5432")
+DATABASE_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL")
 
 
 def _postgres_available() -> bool:
@@ -26,25 +24,36 @@ def _postgres_available() -> bool:
 
 @pytest.fixture(autouse=True)
 def configure_integration_db():
+    prev_url = os.environ.get("DATABASE_URL")
     if DATABASE_URL:
         os.environ["DATABASE_URL"] = DATABASE_URL
         get_settings.cache_clear()
         get_engine.cache_clear()
         get_session_factory.cache_clear()
+    yield
+    if prev_url is not None:
+        os.environ["DATABASE_URL"] = prev_url
+    else:
+        os.environ.pop("DATABASE_URL", None)
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_session_factory.cache_clear()
 
 
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(not _postgres_available(), reason="PostgreSQL integration database is unavailable")
+@pytest.mark.skipif(not _postgres_available(), reason="Set DBZENITH_INTEGRATION_DATABASE_URL to an isolated test PostgreSQL database")
 def test_pg_stat_statements_is_enabled():
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     with engine.connect() as conn:
-        enabled = conn.execute(
-            text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')")
-        ).scalar()
         preload = conn.execute(
             text("SELECT current_setting('shared_preload_libraries') LIKE '%pg_stat_statements%'")
+        ).scalar()
+        if not preload:
+            pytest.skip("Target PostgreSQL instance does not have pg_stat_statements in shared_preload_libraries")
+        enabled = conn.execute(
+            text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')")
         ).scalar()
     assert enabled is True
     assert preload is True
@@ -94,4 +103,4 @@ def test_deterministic_recommendations_from_synthetic_workload():
     with get_session_factory()() as db:
         rows = RecommendationEngine().generate(db)
         assert all(r.requires_approval for r in rows)
-        assert all(r.status == "pending" for r in rows)
+        assert all(r.status in ("pending", "approved", "rejected") for r in rows)

@@ -35,22 +35,38 @@ class AssistantChatResponse(BaseModel):
     audit_trail: list[dict[str, Any]] = Field(default_factory=list)
 
 
+from app.core.auth import require_analyst, require_viewer
+from app.core.security import Role, TokenPayload
+
+
 @router.post("/chat", response_model=AssistantChatResponse)
 def chat_with_assistant(
     request: AssistantChatRequest,
     db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(require_viewer),
 ) -> AssistantChatResponse:
     """Interacts with the Conversational DBA Assistant using LangGraph."""
     session_id = request.session_id or str(uuid.uuid4())
     audit = get_assistant_audit_logger()
 
+    if not audit.bind_session_owner(session_id, str(current_user.user_id)) and current_user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Cannot write to another operator's assistant session.",
+        )
+
+    # Strictly derive effective role from cryptographic token; never trust request.role from JSON body.
+    effective_role = current_user.role.value.lower()
+    if effective_role == "admin":
+        effective_role = "dba"
+
     # Build compiled LangGraph for this session/role
-    graph = create_dba_assistant_graph(db, user_role=request.role)
+    graph = create_dba_assistant_graph(db, user_role=effective_role)
 
     # Initial state
     initial_state: AssistantState = {
         "session_id": session_id,
-        "user_role": request.role,
+        "user_role": effective_role,
         "user_message": request.message,
         "messages": audit.get_session_history(session_id),
         "evidence": {},
@@ -77,9 +93,9 @@ def chat_with_assistant(
         db=db,
         event_category=AuditEventCategory.AI_BOUNDARY if not safety_passed else AuditEventCategory.AGENT_ACTION,
         action="agent_chat_turn" if safety_passed else "agent_safety_violation",
-        actor_id=session_id,
-        actor_username="conversational_dba_user",
-        actor_role=request.role,
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        actor_role=current_user.role.value,
         target_entity="LangGraphAssistant",
         target_id=session_id,
         status="SUCCESS" if safety_passed else "SECURITY_VIOLATION",
@@ -106,9 +122,18 @@ def chat_with_assistant(
 
 
 @router.get("/history/{session_id}")
-def get_session_history(session_id: str) -> dict[str, Any]:
+def get_session_history(
+    session_id: str,
+    current_user: TokenPayload = Depends(require_viewer),
+) -> dict[str, Any]:
     """Retrieves conversation history and audit log for a specific session."""
     audit = get_assistant_audit_logger()
+    owner = audit.get_session_owner(session_id)
+    if owner is not None and owner != str(current_user.user_id) and current_user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Cannot view another operator's assistant session history.",
+        )
     return {
         "session_id": session_id,
         "messages": audit.get_session_history(session_id),
@@ -117,7 +142,9 @@ def get_session_history(session_id: str) -> dict[str, Any]:
 
 
 @router.get("/tools")
-def list_controlled_tools() -> list[dict[str, str]]:
+def list_controlled_tools(
+    _user: TokenPayload = Depends(require_viewer),
+) -> list[dict[str, str]]:
     """Returns the list and descriptions of all 10 authorized controlled tools."""
     tool_docs = [
         {"name": ControlledToolName.GET_SLOW_QUERIES.value, "description": "Fetches slow queries filtered through privacy gateway."},
@@ -135,8 +162,11 @@ def list_controlled_tools() -> list[dict[str, str]]:
 
 
 @router.get("/audit/all")
-def get_all_audit_logs() -> list[dict[str, Any]]:
+def get_all_audit_logs(
+    _user: TokenPayload = Depends(require_analyst),
+) -> list[dict[str, Any]]:
     """Retrieves all assistant tool execution and prompt defense audit events."""
     audit = get_assistant_audit_logger()
     return audit.all_audit_records()
+
 

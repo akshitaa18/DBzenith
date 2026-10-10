@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { getRecommendations, Recommendation, createSimulation, Simulation } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { useAuth } from '../context/AuthContext'
 
 export function RecommendationsPage() {
+  const { canSimulate } = useAuth()
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -143,7 +145,7 @@ export function RecommendationsPage() {
       <div className="card" style={{ padding: '14px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          className="search-input"
+          className="filter-input"
           style={{ flex: 1, minWidth: '220px' }}
           placeholder="Search by target table, index name, or rationale..."
           value={search}
@@ -210,7 +212,9 @@ export function RecommendationsPage() {
             <div>
               <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Improvement:</div>
               <div style={{ fontWeight: 700, color: (simulationResult.improvement ?? 0) > 0 ? '#10b981' : '#ef4444' }}>
-                {simulationResult.improvement != null ? `${(simulationResult.improvement * 100).toFixed(1)}%` : '0%'}
+                {simulationResult.improvement != null
+                  ? `${(Math.abs(simulationResult.improvement) > 1 ? simulationResult.improvement : simulationResult.improvement * 100).toFixed(1)}%`
+                  : '0%'}
               </div>
             </div>
             <div>
@@ -305,7 +309,7 @@ export function RecommendationsPage() {
                     >
                       {isComparing ? '✓ Selected' : '+ Compare'}
                     </button>
-                    {rec.requires_approval && rec.status === 'pending' && (
+                    {rec.requires_approval && rec.status === 'pending' && canSimulate && (
                       <button
                         className="btn btn-primary"
                         style={{ fontSize: '0.75rem', padding: '4px 10px' }}

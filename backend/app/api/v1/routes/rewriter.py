@@ -22,7 +22,7 @@ class SQLRewriteApiRequest(BaseModel):
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.auth import get_current_user_optional
+from app.core.auth import require_analyst
 from app.core.security import TokenPayload
 from app.services.audit.recorder import AuditEventCategory, record_audit_event
 
@@ -32,7 +32,7 @@ def rewrite_sql(
     request: SQLRewriteApiRequest,
     req: Request,
     db: Session = Depends(get_db),
-    current_user: TokenPayload | None = Depends(get_current_user_optional),
+    current_user: TokenPayload = Depends(require_analyst),
 ) -> SQLRewriteResult:
     """Safely rewrite a SQL query using AST transformations and sandbox validation."""
     engine = get_rewrite_engine()
@@ -42,9 +42,9 @@ def rewrite_sql(
         db=db,
         event_category=AuditEventCategory.AI_BOUNDARY,
         action="sql_ast_rewrite",
-        actor_id=current_user.user_id if current_user else "anonymous",
-        actor_username=current_user.username if current_user else "analyst",
-        actor_role=current_user.role.value if current_user else "ANALYST",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        actor_role=current_user.role.value,
         target_entity="SQLQuery",
         status="SUCCESS" if result.safety_verdict == "safe" else "REJECTED",
         details={
@@ -57,3 +57,4 @@ def rewrite_sql(
     )
 
     return result
+

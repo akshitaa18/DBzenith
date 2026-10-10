@@ -459,8 +459,9 @@ export function GnnAnalysisPage() {
               {/* Visual Directed Operator Nodes List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {analysis.graph?.nodes?.map((node: any, idx: number) => {
-                  const bn = getNodeBottleneck(node.id, node.node_type || '')
-                  const isRoot = node.id === analysis.graph?.root_id || idx === 0
+                  const nodeId = node.node_id || node.id || `node_${idx}`
+                  const bn = getNodeBottleneck(nodeId, node.node_type || '')
+                  const isRoot = nodeId === analysis.graph?.root_id || idx === 0
 
                   return (
                     <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
@@ -487,7 +488,7 @@ export function GnnAnalysisPage() {
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#64748b' }}>
-                            {node.id}
+                            {nodeId}
                           </span>
                           <strong style={{ fontSize: '14px', color: '#f8fafc' }}>
                             {node.node_type || 'Plan Operator'}
@@ -616,16 +617,19 @@ export function GnnAnalysisPage() {
                   disabled={rlLoading}
                   onClick={async () => {
                     setRlLoading(true)
+                    setError(null)
                     try {
                       const res = await optimizeWithRl({
                         workload_metrics: {
                           total_cost: analysis.features?.total_cost || 100,
-                          seq_scan_fraction: analysis.features?.seq_scan_fraction || 0.4,
+                          node_count: analysis.features?.node_count || 4,
+                          max_depth: analysis.features?.max_depth || 3,
+                          seq_scan_ratio: analysis.features?.seq_scan_fraction ?? 0.4,
                         },
                       })
                       setRlResult(res)
                     } catch (e: any) {
-                      alert('RL optimization failed: ' + e.message)
+                      setError('RL optimization failed: ' + e.message)
                     } finally {
                       setRlLoading(false)
                     }

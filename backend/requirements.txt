@@ -9,6 +9,7 @@ sqlglot>=25.0.0
 gymnasium>=1.0.0
 numpy>=1.26.0
 langgraph>=0.2.0
+xxhash>=3.5.0
 
 # CPU-only PyTorch: avoids downloading NVIDIA/CUDA runtime packages in Docker.
 --extra-index-url https://download.pytorch.org/whl/cpu

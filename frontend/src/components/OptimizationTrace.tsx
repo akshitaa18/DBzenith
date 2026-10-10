@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { OptimizationFlowHeader, OptimizationStage } from './OptimizationFlowHeader'
 import type { QueryDetail, Recommendation, Simulation, PlanAnalysis, SQLRewriteResponse } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 
 export interface OptimizationTraceProps {
   title?: string
@@ -55,6 +56,7 @@ export function OptimizationTrace({
 }: OptimizationTraceProps) {
   const [expanded, setExpanded] = useState(initialExpanded)
   const [showPlansDiff, setShowPlansDiff] = useState(false)
+  const { canSimulate, canApprove } = useAuth()
 
   // Determine current lifecycle stage
   let stage: OptimizationStage = 'detect'
@@ -337,14 +339,20 @@ export function OptimizationTrace({
                   : 'Awaiting sandbox simulation. Production environment will not be modified without explicit validation.'}
               </p>
               {recommendation && recommendation.id != null && !simulation && onSimulate && (
-                <button
-                  className="btn btn-primary"
-                  style={{ fontSize: '12px', padding: '6px 12px' }}
-                  disabled={isSimulating}
-                  onClick={() => onSimulate(recommendation.id!)}
-                >
-                  {isSimulating ? 'Simulating in Sandbox...' : 'Run Sandbox Simulation 🧪'}
-                </button>
+                canSimulate ? (
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                    disabled={isSimulating}
+                    onClick={() => onSimulate(recommendation.id!)}
+                  >
+                    {isSimulating ? 'Simulating in Sandbox...' : 'Run Sandbox Simulation 🧪'}
+                  </button>
+                ) : (
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                    🔒 Requires ANALYST, DBA, or ADMIN role to run sandbox simulations.
+                  </div>
+                )
               )}
             </div>
 
@@ -364,24 +372,30 @@ export function OptimizationTrace({
               </div>
 
               {recommendation && recommendation.id != null && recommendation.status === 'pending' && onApprove && onReject && (
-                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                  <button
-                    className="btn btn-primary"
-                    style={{ fontSize: '11px', padding: '5px 12px', background: '#059669', borderColor: '#059669' }}
-                    disabled={isDeciding}
-                    onClick={() => onApprove(recommendation.id!)}
-                  >
-                    Approve Migration ✓
-                  </button>
-                  <button
-                    className="secondary-button"
-                    style={{ fontSize: '11px', padding: '5px 12px', color: '#ef4444', borderColor: '#ef4444' }}
-                    disabled={isDeciding}
-                    onClick={() => onReject(recommendation.id!)}
-                  >
-                    Reject ✗
-                  </button>
-                </div>
+                canApprove ? (
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: '11px', padding: '5px 12px', background: '#059669', borderColor: '#059669' }}
+                      disabled={isDeciding}
+                      onClick={() => onApprove(recommendation.id!)}
+                    >
+                      Approve Migration ✓
+                    </button>
+                    <button
+                      className="secondary-button"
+                      style={{ fontSize: '11px', padding: '5px 12px', color: '#ef4444', borderColor: '#ef4444' }}
+                      disabled={isDeciding}
+                      onClick={() => onReject(recommendation.id!)}
+                    >
+                      Reject ✗
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+                    🔒 Read-only view: Only DBA or ADMIN roles can approve or reject migrations.
+                  </div>
+                )
               )}
             </div>
           </div>

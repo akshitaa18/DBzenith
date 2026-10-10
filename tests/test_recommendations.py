@@ -32,3 +32,24 @@ def test_join_advisor_detects_high_loop_nested_loop():
     recs = JoinStrategyAdvisor().advise([q(explain_plan=plan)])
     assert recs and recs[0].type == "join_strategy"
     assert "hash or merge" in recs[0].proposed_change.lower()
+
+
+def test_query_shape_ignores_exists_string_literals_and_aggregates():
+    sql = (
+        "SELECT c.customer_id, sum(o.amount) FROM customers c "
+        "LEFT JOIN orders o ON o.customer_id = c.customer_id "
+        "WHERE EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.order_id) "
+        "AND o.status IN ('pending', 'processing') "
+        "GROUP BY c.customer_id, date_trunc('day', o.order_date) "
+        "ORDER BY sum(o.amount) DESC, c.customer_id ASC"
+    )
+    shape = parse_query_shape(sql)
+    extracted_where_cols = {col for _, col in shape.where_columns}
+    assert "EX" not in extracted_where_cols
+    assert "EXISTS" not in extracted_where_cols
+    assert "pend" not in extracted_where_cols
+    assert "process" not in extracted_where_cols
+    assert ("orders", "status") in shape.where_columns
+    assert ("customers", "customer_id", "ASC") in shape.order_columns
+    assert all("(" not in col for _, col, _ in shape.order_columns)
+    assert all("(" not in col for col in shape.group_columns)

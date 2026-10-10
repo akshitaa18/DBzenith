@@ -14,6 +14,12 @@ def get_engine():
 
 
 @lru_cache
+def get_sandbox_engine():
+    settings = get_settings()
+    return create_engine(settings.sandbox_database_url, pool_pre_ping=True, future=True)
+
+
+@lru_cache
 def get_session_factory():
     return sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, expire_on_commit=False)
 

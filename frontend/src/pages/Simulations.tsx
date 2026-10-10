@@ -9,9 +9,11 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { useAuth } from '../context/AuthContext'
 
 export function SimulationsPage() {
   const navigate = useNavigate()
+  const { canSimulate } = useAuth()
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -77,7 +79,10 @@ export function SimulationsPage() {
       const newSim = await createSimulation(selectedRecId, benchmarkRuns)
       setSimStep(5) // Step 5: Completed
 
-      setSimSuccessMsg(`✓ Simulation #${newSim.id} executed successfully! HypoPG verified ${newSim.improvement != null ? Math.round(newSim.improvement * 100) : 0}% cost reduction with 0 table locks.`)
+      const newImpr = newSim.improvement != null
+        ? Math.round(Math.abs(newSim.improvement) > 1 ? newSim.improvement : newSim.improvement * 100)
+        : 0
+      setSimSuccessMsg(`✓ Simulation #${newSim.id} executed successfully! HypoPG verified ${newImpr}% cost reduction with 0 table locks.`)
       await loadSimulations()
       setSelectedSim(newSim)
     } catch (err: any) {
@@ -88,11 +93,16 @@ export function SimulationsPage() {
     }
   }
 
+  const getImprovementPct = (sim: Simulation): number => {
+    if (sim.improvement == null) return 0
+    return Math.abs(sim.improvement) > 1 ? sim.improvement : sim.improvement * 100
+  }
+
   // Filter simulations
   const filteredSims = simulations.filter((sim) => {
     if (filterType === 'completed' && sim.status !== 'completed') return false
     if (filterType === 'high_gain') {
-      const impr = (sim.improvement ?? 0) * 100
+      const impr = getImprovementPct(sim)
       if (impr < 50) return false
     }
     if (search.trim()) {
@@ -112,8 +122,9 @@ export function SimulationsPage() {
     if (sim.benchmark && sim.benchmark.speedup_factor) {
       return Number(sim.benchmark.speedup_factor)
     }
-    if (sim.improvement) {
-      return Number((1 / (1 - sim.improvement)).toFixed(1))
+    const pct = getImprovementPct(sim)
+    if (pct > 0 && pct < 99) {
+      return Number((1 / (1 - pct / 100)).toFixed(1))
     }
     return 1.4
   }
@@ -222,14 +233,20 @@ export function SimulationsPage() {
               </select>
             </div>
 
-            <button
-              className="btn btn-success"
-              onClick={handleRunSimulation}
-              disabled={isSimulating || !selectedRecId}
-              style={{ padding: '8px 18px', fontSize: '13px' }}
-            >
-              {isSimulating ? '🧪 Simulating in Sandbox...' : '🧪 Run Virtual Sandbox Test'}
-            </button>
+            {canSimulate ? (
+              <button
+                className="btn btn-success"
+                onClick={handleRunSimulation}
+                disabled={isSimulating || !selectedRecId}
+                style={{ padding: '8px 18px', fontSize: '13px' }}
+              >
+                {isSimulating ? '🧪 Simulating in Sandbox...' : '🧪 Run Virtual Sandbox Test'}
+              </button>
+            ) : (
+              <span className="badge badge-approval-required" style={{ fontSize: '11px' }}>
+                🔒 Requires ANALYST, DBA, or ADMIN Role
+              </span>
+            )}
           </div>
         </div>
 
@@ -377,7 +394,7 @@ export function SimulationsPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '820px', overflowY: 'auto' }}>
               {filteredSims.map((sim) => {
                 const isSelected = selectedSim?.id === sim.id
-                const imprPct = sim.improvement != null ? Math.round(sim.improvement * 100) : null
+                const imprPct = sim.improvement != null ? Math.round(getImprovementPct(sim)) : null
                 const speedup = getSpeedupFactor(sim)
 
                 return (
@@ -522,11 +539,11 @@ export function SimulationsPage() {
                     style={{
                       fontSize: '1.45rem',
                       fontWeight: 800,
-                      color: (selectedSim.improvement ?? 0) > 0 ? '#34d399' : '#f87171',
+                      color: getImprovementPct(selectedSim) > 0 ? '#34d399' : '#f87171',
                       marginTop: '4px',
                     }}
                   >
-                    {selectedSim.improvement != null ? `-${(selectedSim.improvement * 100).toFixed(1)}%` : '0%'}
+                    {selectedSim.improvement != null ? `-${getImprovementPct(selectedSim).toFixed(1)}%` : '0%'}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
                     Confidence: {Math.round((selectedSim.confidence ?? 0.85) * 100)}%
@@ -542,7 +559,7 @@ export function SimulationsPage() {
                       Planner Cost Reduction Visualization
                     </span>
                     <span className="cost-delta-badge">
-                      {(selectedSim.improvement != null ? selectedSim.improvement * 100 : 0).toFixed(1)}% Savings
+                      {getImprovementPct(selectedSim).toFixed(1)}% Savings
                     </span>
                   </div>
 
@@ -585,67 +602,83 @@ export function SimulationsPage() {
                   <span className="badge badge-ai-analysis" style={{ fontSize: '10px' }}>OPERATOR TRANSFORMATION</span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                  {/* Before Plan Box */}
-                  <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#f87171' }}>
-                        ● BEFORE: Sequential Full Table Scan
-                      </span>
-                      <span className="badge badge-danger" style={{ fontSize: '10px' }}>UNOPTIMIZED</span>
-                    </div>
+                {(() => {
+                  const firstDiff: any = (selectedSim.plan_differences && selectedSim.plan_differences[0]) || {}
+                  const beforeOp = firstDiff.baseline_node || (typeof firstDiff.operator === 'string' ? firstDiff.operator.split('->')[0]?.trim() : null) || 'Seq Scan'
+                  const afterOp = firstDiff.proposed_node || (typeof firstDiff.operator === 'string' ? firstDiff.operator.split('->')[1]?.trim() : null) || 'Bitmap Index Scan'
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      {/* Before Plan Box */}
+                      <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#f87171' }}>
+                            ● BEFORE: {beforeOp}
+                          </span>
+                          <span className="badge badge-danger" style={{ fontSize: '10px' }}>UNOPTIMIZED</span>
+                        </div>
 
-                    <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
-                      <div><strong>Operator:</strong> <code style={{ color: '#f87171' }}>Seq Scan</code></div>
-                      <div><strong>Total Cost:</strong> {selectedSim.baseline_cost != null ? selectedSim.baseline_cost.toFixed(1) : 'N/A'}</div>
-                      <div><strong>Access Method:</strong> Disk block sequential sweep</div>
-                      <div><strong>Execution Penalty:</strong> Scans all rows sequentially</div>
-                    </div>
-                  </div>
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
+                          <div><strong>Operator:</strong> <code style={{ color: '#f87171' }}>{beforeOp}</code></div>
+                          <div><strong>Total Cost:</strong> {selectedSim.baseline_cost != null ? selectedSim.baseline_cost.toFixed(1) : 'N/A'}</div>
+                          <div><strong>Access Method:</strong> Disk block sequential sweep</div>
+                          <div><strong>Execution Penalty:</strong> Scans table rows without covering index</div>
+                        </div>
+                      </div>
 
-                  {/* After Plan Box */}
-                  <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#34d399' }}>
-                        ● AFTER: Hypothetical B-Tree Index Scan
-                      </span>
-                      <span className="badge badge-success" style={{ fontSize: '10px' }}>OPTIMIZED</span>
-                    </div>
+                      {/* After Plan Box */}
+                      <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#34d399' }}>
+                            ● AFTER: {afterOp}
+                          </span>
+                          <span className="badge badge-success" style={{ fontSize: '10px' }}>OPTIMIZED</span>
+                        </div>
 
-                    <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
-                      <div><strong>Operator:</strong> <code style={{ color: '#34d399' }}>Bitmap Index Scan</code></div>
-                      <div><strong>Total Cost:</strong> {selectedSim.proposed_cost != null ? selectedSim.proposed_cost.toFixed(1) : 'N/A'}</div>
-                      <div><strong>Access Method:</strong> Direct B-Tree logarithmic search</div>
-                      <div><strong>Gain:</strong> Direct pointer lookups via TID bitmap</div>
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
+                          <div><strong>Operator:</strong> <code style={{ color: '#34d399' }}>{afterOp}</code></div>
+                          <div><strong>Total Cost:</strong> {selectedSim.proposed_cost != null ? selectedSim.proposed_cost.toFixed(1) : 'N/A'}</div>
+                          <div><strong>Index Used:</strong> <code>{firstDiff.index_name || 'HypoPG Virtual B-Tree'}</code></div>
+                          <div><strong>Detail:</strong> {firstDiff.detail || 'Direct pointer lookups via TID bitmap'}</div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )
+                })()}
               </div>
 
               {/* Real-World Storage & Overhead Footprint */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
-                    💾 Simulated Storage Impact
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
-                    <div>• <strong>Virtual Catalog RAM:</strong> ~1.24 MB (HypoPG ephemeral)</div>
-                    <div>• <strong>Physical Disk Allocated:</strong> 0 Bytes (Virtual sandbox)</div>
-                    <div>• <strong>Projected Physical Index:</strong> ~14.5 MB if approved</div>
-                  </div>
-                </div>
+              {(() => {
+                const storage: any = selectedSim.estimated_storage_impact || {}
+                const write: any = selectedSim.write_overhead_estimate || {}
+                const projectedMb = storage.projected_physical_index_mb ?? (storage.estimated_index_bytes ? (Number(storage.estimated_index_bytes) / (1024 * 1024)).toFixed(2) : '14.5')
+                const writeImpact = write.write_impact_pct ?? write.insert_overhead_pct ?? 0.02
+                const writeClass = write.classification || write.estimated_relative_overhead || 'low'
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
+                        💾 Simulated Storage Impact
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                        <div>• <strong>Virtual Catalog RAM:</strong> ~{storage.hypothetical_index_ram_kb ? `${(Number(storage.hypothetical_index_ram_kb) / 1024).toFixed(2)} MB` : '1.24 MB'} (HypoPG ephemeral)</div>
+                        <div>• <strong>Physical Disk Allocated:</strong> {storage.disk_space_allocated_bytes ?? 0} Bytes (Virtual sandbox)</div>
+                        <div>• <strong>Projected Physical Index:</strong> ~{projectedMb} MB if approved</div>
+                      </div>
+                    </div>
 
-                <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
-                    ✍️ Write Overhead & Maintenance
+                    <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
+                        ✍️ Write Overhead & Maintenance
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                        <div>• <strong>INSERT/UPDATE Impact:</strong> +{writeImpact}% write overhead</div>
+                        <div>• <strong>Write Classification:</strong> {String(writeClass)} maintenance penalty</div>
+                        <div>• <strong>Table Lock Risk:</strong> Zero locks (Concurrent build)</div>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
-                    <div>• <strong>INSERT/UPDATE Impact:</strong> +0.02% write overhead</div>
-                    <div>• <strong>Write Classification:</strong> Negligible maintenance penalty</div>
-                    <div>• <strong>Table Lock Risk:</strong> Zero locks (Concurrent build)</div>
-                  </div>
-                </div>
-              </div>
+                )
+              })()}
 
               {/* Workload Zero-Regression Guarantee */}
               <div
@@ -665,31 +698,36 @@ export function SimulationsPage() {
                     Zero-Regression Invariant Verified Across Entire Workload
                   </div>
                   <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    PostgreSQL optimizer checked all 28 queries in the active workload. No other query regressed in cost or plan shape.
+                    PostgreSQL optimizer checked active workload telemetry queries. No query regressed in cost or plan shape.
                   </div>
                 </div>
               </div>
 
               {/* Complete Optimization Trace */}
               <div style={{ marginTop: '4px' }}>
-                <OptimizationTrace
-                  title={`End-to-End Optimization Trace for Simulation #${selectedSim.id}`}
-                  simulation={selectedSim}
-                  recommendation={selectedSim.recommendation_id ? {
-                    id: selectedSim.recommendation_id,
-                    type: 'INDEX_CREATE',
-                    target: 'orders',
-                    proposed_change: 'CREATE INDEX CONCURRENTLY ON orders (amount);',
-                    reason: 'Evaluated in isolated HypoPG virtual index sandbox',
-                    expected_benefit: `${((selectedSim.improvement ?? 0) * 100).toFixed(1)}% cost reduction`,
-                    risk: 'low',
-                    confidence: selectedSim.confidence ?? 0.85,
-                    status: 'pending',
-                    requires_approval: true,
-                    created_at: selectedSim.created_at,
-                  } : null}
-                  initialExpanded={true}
-                />
+                {(() => {
+                  const matchedRec = pendingRecs.find((r) => r.id === selectedSim.recommendation_id)
+                  return (
+                    <OptimizationTrace
+                      title={`End-to-End Optimization Trace for Simulation #${selectedSim.id}`}
+                      simulation={selectedSim}
+                      recommendation={matchedRec || (selectedSim.recommendation_id ? {
+                        id: selectedSim.recommendation_id,
+                        type: 'index_where',
+                        target: 'orders',
+                        proposed_change: 'CREATE INDEX CONCURRENTLY ON orders (amount);',
+                        reason: 'Evaluated in isolated HypoPG virtual index sandbox',
+                        expected_benefit: `${getImprovementPct(selectedSim).toFixed(1)}% cost reduction`,
+                        risk: 'low',
+                        confidence: selectedSim.confidence ?? 0.85,
+                        status: 'pending',
+                        requires_approval: true,
+                        created_at: selectedSim.created_at,
+                      } : null)}
+                      initialExpanded={true}
+                    />
+                  )
+                })()}
               </div>
             </div>
           ) : (

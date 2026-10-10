@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_analyst, require_viewer
+from app.core.security import TokenPayload
 from app.db.session import get_db
 from app.models.workload import QueryStatistic, WorkloadSnapshot
 from app.schemas.telemetry import PaginatedQueries, QueryDetail
@@ -178,6 +180,7 @@ def slow_queries(
     database_name: str | None = Query(None),
     user_name: str | None = Query(None),
     db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
 ) -> PaginatedQueries:
     from app.core.config import get_settings
     threshold = min_mean_ms if min_mean_ms is not None else get_settings().slow_query_threshold_ms
@@ -201,6 +204,7 @@ def slow_queries(
 def calculate_optimizations(
     query_id: str | None = Query(None, description="Optional query ID to calculate, or all if omitted"),
     db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
 ):
     """Calculates before and after plan cost and latency for queries on user demand and persists simulation models."""
     from app.services.recommendations.engine import RecommendationEngine
@@ -293,8 +297,8 @@ def calculate_optimizations(
 
 
 def find_query_statistic(db: Session, query_id_str: str) -> QueryStatistic | None:
-    """Finds a QueryStatistic row with support for row ID, 64-bit queryid, JS-precision tolerance, and fallback."""
-    if query_id_str in {"latest", "top"}:
+    """Finds a QueryStatistic row with support for row ID, 64-bit queryid, JS-precision tolerance, and explicit aliases."""
+    if str(query_id_str).lower() in {"latest", "top", "default"}:
         return db.scalar(
             select(QueryStatistic)
             .order_by(desc(QueryStatistic.id))
@@ -331,18 +335,15 @@ def find_query_statistic(db: Session, query_id_str: str) -> QueryStatistic | Non
             .order_by(desc(QueryStatistic.id))
             .limit(1)
         )
-    if row is None:
-        # Graceful fallback to latest query if requested query was not found
-        row = db.scalar(
-            select(QueryStatistic)
-            .order_by(desc(QueryStatistic.id))
-            .limit(1)
-        )
     return row
 
 
 @router.get("/{query_id}", response_model=QueryDetail)
-def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
+def query_detail(
+    query_id: str,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> QueryDetail:
     """Retrieves query statistics by PostgreSQL queryid or internal table row id."""
     row = find_query_statistic(db, query_id)
     if row is None:
@@ -352,7 +353,11 @@ def query_detail(query_id: str, db: Session = Depends(get_db)) -> QueryDetail:
 
 
 @router.get("/{query_id}/trace")
-def query_optimization_trace(query_id: str, db: Session = Depends(get_db)) -> dict:
+def query_optimization_trace(
+    query_id: str,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> dict:
     from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
     from app.models.simulation import OptimizationSimulation
     from app.schemas.recommendations import RecommendationResponse

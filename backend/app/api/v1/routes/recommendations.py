@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_analyst, require_dba_or_admin, require_viewer
+from app.core.security import Role, TokenPayload
 from app.db.session import get_db
 from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
+from app.models.security import SecurityAuditEvent
 from app.schemas.recommendations import RecommendationDecisionRequest, RecommendationPage, RecommendationResponse
+from app.services.audit.recorder import AuditEventCategory
 from app.services.recommendations.engine import RecommendationEngine
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
+_DECISION_LOCK = threading.Lock()
 
 
 def _response(row: OptimizationRecommendation) -> RecommendationResponse:
@@ -24,9 +30,11 @@ def list_recommendations(
     status: str | None = Query(None, pattern="^(pending|approved|rejected)$"),
     type: str | None = None,
     db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(require_viewer),
 ) -> RecommendationPage:
-    # Generation is deterministic and idempotent; it only reads PostgreSQL telemetry/catalogs.
-    RecommendationEngine().generate(db)
+    # Only synthesize new recommendations for ANALYST+ roles; VIEWER strictly reads existing rows.
+    if current_user.role != Role.VIEWER:
+        RecommendationEngine().generate(db)
     query = db.query(OptimizationRecommendation)
     if status:
         query = query.filter(OptimizationRecommendation.status == status)
@@ -38,7 +46,10 @@ def list_recommendations(
 
 
 @router.get("/audit/events")
-def list_recommendation_audit_events(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def list_recommendation_audit_events(
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
+) -> list[dict[str, Any]]:
     """Lists audit events for recommendation decisions (approvals, rejections)."""
     events = db.query(RecommendationAuditEvent).order_by(RecommendationAuditEvent.created_at.desc()).limit(50).all()
     return [
@@ -57,7 +68,11 @@ def list_recommendation_audit_events(db: Session = Depends(get_db)) -> list[dict
 
 
 @router.get("/{recommendation_id}", response_model=RecommendationResponse)
-def get_recommendation(recommendation_id: int, db: Session = Depends(get_db)) -> RecommendationResponse:
+def get_recommendation(
+    recommendation_id: int,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> RecommendationResponse:
     row = db.get(OptimizationRecommendation, recommendation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="recommendation_not_found")
@@ -65,7 +80,11 @@ def get_recommendation(recommendation_id: int, db: Session = Depends(get_db)) ->
 
 
 @router.get("/{recommendation_id}/trace")
-def get_recommendation_trace(recommendation_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_recommendation_trace(
+    recommendation_id: int,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> dict[str, Any]:
     from app.models.simulation import OptimizationSimulation
     from app.models.workload import QueryStatistic
     from app.schemas.simulations import SimulationResponse
@@ -142,70 +161,69 @@ def get_recommendation_trace(recommendation_id: int, db: Session = Depends(get_d
     }
 
 
-
-from fastapi import Request
-from app.core.auth import get_current_user_optional, require_dba_or_admin
-from app.core.security import Role, TokenPayload
-from app.services.audit.recorder import AuditEventCategory, record_audit_event
-
-
 def _decide(
     db: Session,
     recommendation_id: int,
     new_status: str,
     reason: str,
-    request: Request | None = None,
-    current_user: TokenPayload | None = None,
+    request: Request | None,
+    current_user: TokenPayload,
 ) -> RecommendationResponse:
-    row = db.get(OptimizationRecommendation, recommendation_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="recommendation_not_found")
-    if row.status != "pending":
-        raise HTTPException(status_code=409, detail=f"recommendation_already_{row.status}")
+    with _DECISION_LOCK:
+        row = db.get(OptimizationRecommendation, recommendation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="recommendation_not_found")
+        if row.status != "pending":
+            raise HTTPException(status_code=409, detail=f"recommendation_already_{row.status}")
 
-    # Enforce RBAC: If a user token is provided, verify it is DBA or ADMIN.
-    if current_user and current_user.role not in {Role.DBA, Role.ADMIN}:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Only DBA or ADMIN roles can approve or reject recommendations (current: {current_user.role.value}).",
-        )
+        if current_user.role not in {Role.DBA, Role.ADMIN}:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Only DBA or ADMIN roles can approve or reject recommendations (current: {current_user.role.value}).",
+            )
 
-    previous = row.status
-    row.status = new_status
+        previous = row.status
+        row.status = new_status
 
-    # Legacy event
-    db.add(RecommendationAuditEvent(
-        recommendation_id=row.id, action=new_status, previous_status=previous,
-        new_status=new_status, reason=reason,
-        metadata_json=json.dumps({"requires_approval": row.requires_approval}),
-    ))
-    db.commit()
-    db.refresh(row)
+        db.add(RecommendationAuditEvent(
+            recommendation_id=row.id,
+            action=new_status,
+            previous_status=previous,
+            new_status=new_status,
+            reason=reason,
+            metadata_json=json.dumps({"requires_approval": row.requires_approval}),
+        ))
 
-    # Security Audit event
-    ip = request.client.host if request and request.client else None
-    ua = request.headers.get("user-agent") if request else None
-    record_audit_event(
-        db=db,
-        event_category=AuditEventCategory.APPROVAL if new_status == "approved" else AuditEventCategory.REJECTION,
-        action=f"recommendation_{new_status}",
-        actor_id=current_user.user_id if current_user else "system",
-        actor_username=current_user.username if current_user else "dba_operator",
-        actor_role=current_user.role.value if current_user else "DBA",
-        target_entity="OptimizationRecommendation",
-        target_id=str(row.id),
-        status="SUCCESS",
-        ip_address=ip,
-        user_agent=ua,
-        details={
+        ip = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        details = {
             "proposed_change": row.proposed_change,
             "target": row.target,
             "reason": reason,
             "previous_status": previous,
-        },
-    )
+        }
+        db.add(SecurityAuditEvent(
+            event_category=AuditEventCategory.APPROVAL if new_status == "approved" else AuditEventCategory.REJECTION,
+            action=f"recommendation_{new_status}",
+            actor_id=str(current_user.user_id),
+            actor_username=current_user.username,
+            actor_role=current_user.role.value,
+            target_entity="OptimizationRecommendation",
+            target_id=str(row.id),
+            status="SUCCESS",
+            ip_address=ip,
+            user_agent=ua,
+            details_json=json.dumps(details, default=str),
+        ))
 
-    return _response(row)
+        try:
+            db.commit()
+            db.refresh(row)
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="decision_transaction_failed") from exc
+
+        return _response(row)
 
 
 @router.post("/{recommendation_id}/approve", response_model=RecommendationResponse)
@@ -214,7 +232,7 @@ def approve(
     request_data: RecommendationDecisionRequest,
     req: Request,
     db: Session = Depends(get_db),
-    current_user: TokenPayload | None = Depends(get_current_user_optional),
+    current_user: TokenPayload = Depends(require_dba_or_admin),
 ) -> RecommendationResponse:
     return _decide(db, recommendation_id, "approved", request_data.reason, req, current_user)
 
@@ -225,7 +243,8 @@ def reject(
     request_data: RecommendationDecisionRequest,
     req: Request,
     db: Session = Depends(get_db),
-    current_user: TokenPayload | None = Depends(get_current_user_optional),
+    current_user: TokenPayload = Depends(require_dba_or_admin),
 ) -> RecommendationResponse:
     return _decide(db, recommendation_id, "rejected", request_data.reason, req, current_user)
+
 

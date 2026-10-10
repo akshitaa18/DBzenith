@@ -8,8 +8,8 @@ from app.models.recommendation import OptimizationRecommendation
 from app.models.workload import QueryStatistic, WorkloadSnapshot
 from app.services.sandbox.simulator import SandboxSimulator
 
-PRODUCTION_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL") or os.getenv("DATABASE_URL")
-SANDBOX_URL = os.getenv("SANDBOX_DATABASE_URL")
+PRODUCTION_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL")
+SANDBOX_URL = os.getenv("DBZENITH_INTEGRATION_SANDBOX_URL") or os.getenv("SANDBOX_DATABASE_URL")
 
 
 def _available(url: str | None) -> bool:
@@ -25,7 +25,7 @@ def _available(url: str | None) -> bool:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not _available(PRODUCTION_URL) or not _available(SANDBOX_URL), reason="production and sandbox PostgreSQL are required")
+@pytest.mark.skipif(not _available(PRODUCTION_URL) or not _available(SANDBOX_URL), reason="Set DBZENITH_INTEGRATION_DATABASE_URL and SANDBOX_DATABASE_URL to isolated test PostgreSQL instances")
 def test_index_simulation_isolated_from_production():
     engine = create_engine(PRODUCTION_URL, pool_pre_ping=True)
     with engine.begin() as conn:

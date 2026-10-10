@@ -17,6 +17,7 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { useAuth } from '../context/AuthContext'
 
 function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
@@ -40,6 +41,7 @@ function formatWindow(seconds: number | undefined | null) {
 }
 
 export function Overview() {
+  const { canApprove } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<WorkloadSummary | null>(null)
@@ -83,12 +85,13 @@ export function Overview() {
 
   const handleSimulateFeatured = async (recId: number) => {
     setIsSimulating(true)
+    setError(null)
     try {
       await createSimulation(recId, 3)
       const updated = await getRecommendationTrace(recId)
       setFeaturedTrace(updated)
     } catch (err: any) {
-      alert(`Simulation failed: ${err.message}`)
+      setError(`Simulation failed: ${err.message}`)
     } finally {
       setIsSimulating(false)
     }
@@ -96,13 +99,14 @@ export function Overview() {
 
   const handleApproveFeatured = async (recId: number) => {
     setIsDeciding(true)
+    setError(null)
     try {
       await approveRecommendation(recId, 'Approved via Overview Trace')
       const updated = await getRecommendationTrace(recId)
       setFeaturedTrace(updated)
       loadData()
     } catch (err: any) {
-      alert(`Approval failed: ${err.message}`)
+      setError(`Approval failed: ${err.message}`)
     } finally {
       setIsDeciding(false)
     }
@@ -110,13 +114,14 @@ export function Overview() {
 
   const handleRejectFeatured = async (recId: number) => {
     setIsDeciding(true)
+    setError(null)
     try {
       await rejectRecommendation(recId, 'Rejected via Overview Trace')
       const updated = await getRecommendationTrace(recId)
       setFeaturedTrace(updated)
       loadData()
     } catch (err: any) {
-      alert(`Rejection failed: ${err.message}`)
+      setError(`Rejection failed: ${err.message}`)
     } finally {
       setIsDeciding(false)
     }
@@ -174,21 +179,25 @@ export function Overview() {
 
         {/* Global Demo & Refresh Controls */}
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '8px 16px', fontWeight: 600, fontSize: '13px' }}
-            disabled={seedingDemo}
-            onClick={handleSeedDemo}
-          >
-            {seedingDemo ? 'Generating Workload...' : '🚀 Load Demo Workload'}
-          </button>
-          <button
-            className="btn btn-secondary"
-            style={{ padding: '8px 14px', fontSize: '13px' }}
-            onClick={handleCollectTelemetry}
-          >
-            🔄 Capture Snapshot
-          </button>
+          {canApprove && (
+            <>
+              <button
+                className="btn btn-primary"
+                style={{ padding: '8px 16px', fontWeight: 600, fontSize: '13px' }}
+                disabled={seedingDemo}
+                onClick={handleSeedDemo}
+              >
+                {seedingDemo ? 'Generating Workload...' : '🚀 Load Demo Workload'}
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '8px 14px', fontSize: '13px' }}
+                onClick={handleCollectTelemetry}
+              >
+                🔄 Capture Snapshot
+              </button>
+            </>
+          )}
           <button
             className="btn btn-secondary"
             style={{ padding: '8px 14px', fontSize: '13px' }}

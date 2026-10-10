@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user_optional, require_role
+from app.core.auth import require_analyst
 from app.core.security import Role, TokenPayload
 from app.db.session import get_db
 from app.models.security import SecurityAuditEvent
@@ -39,7 +39,7 @@ def list_security_audit_events(
     status: str | None = Query(None, description="Filter by status (SUCCESS, FAILURE)"),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
-    user: TokenPayload | None = Depends(get_current_user_optional),
+    user: TokenPayload = Depends(require_analyst),
 ) -> list[SecurityAuditEventItem]:
     """Retrieves chronological audit events from the immutable ledger."""
     query = db.query(SecurityAuditEvent)

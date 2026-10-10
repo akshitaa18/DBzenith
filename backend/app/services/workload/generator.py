@@ -507,7 +507,8 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
         print("  [OK] Stale queries and recommendations cleared.")
 
         # 2. Ensure Real Schema & Demo Tables
-        print("\n[Step 2/7] Verifying e-commerce and demo tables...")
+        print("\n[Step 2/7] Verifying e-commerce, security, and demo tables...")
+        ensure_default_users(session)
         ensure_ecommerce_tables(session)
         session.execute(text("""
             CREATE TABLE IF NOT EXISTS telemetry_demo_orders (
@@ -622,14 +623,20 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
 
         # 4. Populate Query Statistics for the latest snapshot
         print("\n[Step 4/7] Registering 28 comprehensive queries with 24-hour observation telemetry...")
-        import xxhash
+        try:
+            import xxhash
+            def _hash64(data: bytes) -> int:
+                return xxhash.xxh64(data).intdigest()
+        except ImportError:
+            def _hash64(data: bytes) -> int:
+                return int.from_bytes(hashlib.sha256(data).digest()[:8], "big")
 
         db_name = session.execute(text("SELECT current_database();")).scalar() or "dbzenith"
         persisted_query_stats = []
 
         for idx, item in enumerate(COMPREHENSIVE_QUERIES, 1):
             q_text = item["query"]
-            h = xxhash.xxh64(q_text.encode("utf-8")).intdigest()
+            h = _hash64(q_text.encode("utf-8"))
             if h >= 2**63:
                 h = h - 2**64  # Convert to signed 64-bit bigint
 
@@ -842,6 +849,7 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
 
     finally:
         session.close()
+        engine.dispose()
 
 
 if __name__ == "__main__":
@@ -1002,25 +1010,61 @@ def ensure_ecommerce_tables(session) -> None:
         session.commit()
 
 
+def ensure_default_users(session) -> None:
+    """Seeds default operator accounts (ADMIN, DBA, ANALYST, VIEWER) when security_users is empty."""
+    from app.core.security import hash_password, Role
+
+    try:
+        user_count = session.query(User).count()
+        if user_count == 0:
+            defaults = [
+                ("admin", "admin@dbzenith.local", "DBZenith_Admin_2026!", Role.ADMIN.value),
+                ("dba_operator", "dba@dbzenith.local", "DBZenith_DBA_2026!", Role.DBA.value),
+                ("analyst", "analyst@dbzenith.local", "DBZenith_Analyst_2026!", Role.ANALYST.value),
+                ("viewer", "viewer@dbzenith.local", "DBZenith_Viewer_2026!", Role.VIEWER.value),
+            ]
+            for uname, email, pwd, role_val in defaults:
+                pwd_hash, salt = hash_password(pwd)
+                session.add(
+                    User(
+                        username=uname,
+                        email=email,
+                        password_hash=pwd_hash,
+                        salt=salt,
+                        role=role_val,
+                        is_active=True,
+                    )
+                )
+            session.commit()
+    except Exception as exc:
+        session.rollback()
+        print(f"[BootstrapUsers] Skipped or failed: {exc}", flush=True)
+
+
 def auto_seed_if_empty(session_or_db_url=None) -> bool:
-    """Checks if telemetry database has zero slow queries or zero snapshots. If so, automatically seeds comprehensive workload."""
+    """Checks if telemetry database has zero snapshots or zero query statistics. If so, automatically seeds comprehensive workload."""
     from app.core.config import get_settings
     from app.models.workload import WorkloadSnapshot, QueryStatistic
     from app.db.base import Base
-    
+
     settings = get_settings()
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
-    Base.metadata.create_all(bind=engine)
-    SessionFactory = sessionmaker(bind=engine)
-    with SessionFactory() as session:
-        try:
-            ensure_ecommerce_tables(session)
-            count = session.query(WorkloadSnapshot).filter(WorkloadSnapshot.slow_queries > 0).count()
-            query_count = session.query(QueryStatistic).count()
-            if count == 0 or query_count == 0:
-                print("[AutoSeed] Database is uninitialized or empty. Auto-seeding comprehensive workload...", flush=True)
-                generate_comprehensive_workload(settings.database_url)
-                return True
-        except Exception as e:
-            print(f"[AutoSeed] Warning: {e}", flush=True)
-    return False
+    db_url = session_or_db_url if isinstance(session_or_db_url, str) else settings.database_url
+    engine = create_engine(db_url, pool_pre_ping=True)
+    try:
+        Base.metadata.create_all(bind=engine)
+        SessionFactory = sessionmaker(bind=engine)
+        with SessionFactory() as session:
+            try:
+                ensure_default_users(session)
+                ensure_ecommerce_tables(session)
+                count = session.query(WorkloadSnapshot).count()
+                query_count = session.query(QueryStatistic).count()
+                if count == 0 or query_count == 0:
+                    print("[AutoSeed] Database is uninitialized or empty. Auto-seeding comprehensive workload...", flush=True)
+                    generate_comprehensive_workload(db_url)
+                    return True
+            except Exception as e:
+                print(f"[AutoSeed] Warning: {e}", flush=True)
+        return False
+    finally:
+        engine.dispose()

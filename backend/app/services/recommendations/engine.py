@@ -26,7 +26,11 @@ class RecommendationEngine:
         recs.extend(self.rewrite.advise(queries))
         recs.extend(self.join.advise(queries))
         persisted = []
+        seen_keys: set[str] = set()
         for rec in recs:
+            if rec.key in seen_keys:
+                continue
+            seen_keys.add(rec.key)
             existing = db.query(OptimizationRecommendation).filter_by(recommendation_key=rec.key).first()
             if existing:
                 persisted.append(existing)

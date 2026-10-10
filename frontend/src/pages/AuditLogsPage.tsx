@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import {
   getAssistantAuditLogs,
   getRecommendationAuditEvents,
+  getSecurityAuditEvents,
   RecommendationAuditEvent,
+  SecurityAuditEvent,
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 
@@ -18,8 +20,9 @@ type AssistantAuditItem = {
 }
 
 export function AuditLogsPage() {
-  const [tab, setTab] = useState<'recommendations' | 'assistant'>('recommendations')
+  const [tab, setTab] = useState<'recommendations' | 'security' | 'assistant'>('recommendations')
   const [recEvents, setRecEvents] = useState<RecommendationAuditEvent[]>([])
+  const [securityEvents, setSecurityEvents] = useState<SecurityAuditEvent[]>([])
   const [assistantEvents, setAssistantEvents] = useState<AssistantAuditItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,11 +32,13 @@ export function AuditLogsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [recs, asst] = await Promise.all([
+      const [recs, sec, asst] = await Promise.all([
         getRecommendationAuditEvents(),
+        getSecurityAuditEvents(100).catch(() => []),
         getAssistantAuditLogs(),
       ])
       setRecEvents(recs || [])
+      setSecurityEvents(sec || [])
       setAssistantEvents(asst || [])
     } catch (err: any) {
       setError(err?.message || 'Failed to load audit logs')
@@ -54,6 +59,18 @@ export function AuditLogsPage() {
       r.reason.toLowerCase().includes(q) ||
       String(r.recommendation_id).includes(q) ||
       r.new_status.toLowerCase().includes(q)
+    )
+  })
+
+  const filteredSecurityEvents = securityEvents.filter((s) => {
+    if (!filterText.trim()) return true
+    const q = filterText.toLowerCase()
+    return (
+      s.event_category.toLowerCase().includes(q) ||
+      s.action.toLowerCase().includes(q) ||
+      (s.actor_username && s.actor_username.toLowerCase().includes(q)) ||
+      (s.target_entity && s.target_entity.toLowerCase().includes(q)) ||
+      s.status.toLowerCase().includes(q)
     )
   })
 
@@ -116,9 +133,9 @@ export function AuditLogsPage() {
       <div className="card" style={{ padding: '14px', display: 'flex', gap: '12px', alignItems: 'center' }}>
         <input
           type="text"
-          className="search-input"
+          className="filter-input"
           style={{ flex: 1 }}
-          placeholder="Filter audit entries by action, tool name, recommendation ID, or reason..."
+          placeholder="Filter audit entries by action, actor, tool name, recommendation ID, or reason..."
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
         />
@@ -138,10 +155,16 @@ export function AuditLogsPage() {
           Recommendation Decisions ({recEvents.length})
         </button>
         <button
+          className={`subnav-tab ${tab === 'security' ? 'active' : ''}`}
+          onClick={() => setTab('security')}
+        >
+          Unified Security Ledger ({securityEvents.length})
+        </button>
+        <button
           className={`subnav-tab ${tab === 'assistant' ? 'active' : ''}`}
           onClick={() => setTab('assistant')}
         >
-          Assistant Tool Invocations & Security ({assistantEvents.length})
+          Assistant Tool Invocations ({assistantEvents.length})
         </button>
       </div>
 
@@ -165,7 +188,7 @@ export function AuditLogsPage() {
           {filteredRecEvents.length === 0 ? (
             <div className="card empty-state">No recommendation audit events match your filter.</div>
           ) : (
-            <div className="table-wrapper">
+            <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
@@ -178,33 +201,92 @@ export function AuditLogsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRecEvents.map((event) => (
-                    <tr key={event.id}>
+                  {filteredRecEvents.map((event) => {
+                    const actLower = event.action.toLowerCase()
+                    const isApprove = actLower.startsWith('approv')
+                    const isReject = actLower.startsWith('reject')
+                    return (
+                      <tr key={event.id}>
+                        <td style={{ fontSize: '0.75rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                          {event.created_at ? new Date(event.created_at).toLocaleString() : 'N/A'}
+                        </td>
+                        <td style={{ fontWeight: 600, color: '#38bdf8' }}>#{event.recommendation_id}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              isApprove
+                                ? 'badge-success'
+                                : isReject
+                                ? 'badge-danger'
+                                : 'badge-warning'
+                            }`}
+                          >
+                            {event.action.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '0.8rem' }}>
+                          <span style={{ color: '#94a3b8' }}>{event.previous_status || 'none'}</span>
+                          <span style={{ color: '#64748b', margin: '0 4px' }}>&rarr;</span>
+                          <span style={{ fontWeight: 600, color: '#f8fafc' }}>{event.new_status}</span>
+                        </td>
+                        <td style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>{event.reason}</td>
+                        <td style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#64748b' }}>
+                          {JSON.stringify(event.metadata)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Table: Unified Security Audit Ledger */}
+      {!loading && !error && tab === 'security' && (
+        <div>
+          {filteredSecurityEvents.length === 0 ? (
+            <div className="card empty-state">No unified security audit events match your filter.</div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Category</th>
+                    <th>Action</th>
+                    <th>Actor</th>
+                    <th>Role</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSecurityEvents.map((ev) => (
+                    <tr key={ev.id}>
                       <td style={{ fontSize: '0.75rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                        {event.created_at ? new Date(event.created_at).toLocaleString() : 'N/A'}
+                        {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : 'N/A'}
                       </td>
-                      <td style={{ fontWeight: 600, color: '#38bdf8' }}>#{event.recommendation_id}</td>
                       <td>
-                        <span
-                          className={`badge ${
-                            event.action === 'approve'
-                              ? 'badge-success'
-                              : event.action === 'reject'
-                              ? 'badge-danger'
-                              : 'badge-warning'
-                          }`}
-                        >
-                          {event.action.toUpperCase()}
+                        <span className="badge badge-observed">{ev.event_category}</span>
+                      </td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#38bdf8' }}>
+                        {ev.action}
+                      </td>
+                      <td style={{ fontSize: '0.8rem', color: '#f8fafc' }}>
+                        {ev.actor_username || ev.actor_id || 'system'}
+                      </td>
+                      <td>
+                        <span className="badge badge-ai-analysis">{ev.actor_role || 'SYSTEM'}</span>
+                      </td>
+                      <td style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>
+                        {ev.target_entity || '—'}{ev.target_id ? ` #${ev.target_id}` : ''}
+                      </td>
+                      <td>
+                        <span className={`badge ${ev.status === 'SUCCESS' ? 'badge-success' : 'badge-danger'}`}>
+                          {ev.status}
                         </span>
-                      </td>
-                      <td style={{ fontSize: '0.8rem' }}>
-                        <span style={{ color: '#94a3b8' }}>{event.previous_status || 'none'}</span>
-                        <span style={{ color: '#64748b', margin: '0 4px' }}>&rarr;</span>
-                        <span style={{ fontWeight: 600, color: '#f8fafc' }}>{event.new_status}</span>
-                      </td>
-                      <td style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>{event.reason}</td>
-                      <td style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#64748b' }}>
-                        {JSON.stringify(event.metadata)}
                       </td>
                     </tr>
                   ))}
@@ -221,7 +303,7 @@ export function AuditLogsPage() {
           {filteredAssistantEvents.length === 0 ? (
             <div className="card empty-state">No assistant tool audit logs match your filter.</div>
           ) : (
-            <div className="table-wrapper">
+            <div className="table-wrap">
               <table>
                 <thead>
                   <tr>

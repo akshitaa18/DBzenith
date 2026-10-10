@@ -74,15 +74,20 @@ class IndexAdvisor:
 
     @staticmethod
     def _indexes(db: Session) -> list[dict[str, Any]]:
-        rows = db.execute(text("""
-            SELECT i.schemaname, i.tablename, i.indexname, i.indexdef,
-                   ix.indisunique AS is_unique, ix.indisprimary AS is_primary
-            FROM pg_indexes i
-            JOIN pg_class c ON c.relname = i.indexname
-            JOIN pg_index ix ON ix.indexrelid = c.oid
-            JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
-            WHERE i.schemaname NOT IN ('pg_catalog', 'information_schema')
-        """)).mappings().all()
+        if db.bind and db.bind.dialect.name != "postgresql":
+            return []
+        try:
+            rows = db.execute(text("""
+                SELECT i.schemaname, i.tablename, i.indexname, i.indexdef,
+                       ix.indisunique AS is_unique, ix.indisprimary AS is_primary
+                FROM pg_indexes i
+                JOIN pg_class c ON c.relname = i.indexname
+                JOIN pg_index ix ON ix.indexrelid = c.oid
+                JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
+                WHERE i.schemaname NOT IN ('pg_catalog', 'information_schema')
+            """)).mappings().all()
+        except Exception:
+            return []
         result = []
         for r in rows:
             cols = re.findall(r"\((.*?)\)", r["indexdef"] or "")
@@ -112,7 +117,7 @@ class IndexAdvisor:
     @staticmethod
     def _recommendation(kind: str, relation: str, columns: list[str], q: QueryStatistic, confidence: float, *, reason: str, change: str, benefit: str, risk: str) -> Recommendation:
         affected = [{"query_id": q.query_id, "mean_exec_time_ms": round(q.mean_exec_time_ms, 3), "calls": q.calls, "frequency_per_minute": round(q.query_frequency_per_minute, 3)}]
-        raw_key = f"{kind}|{relation}|{','.join(columns)}|{q.query_id}"
+        raw_key = f"{kind}|{relation}|{','.join(columns)}|{change}"
         key = hashlib.sha256(raw_key.encode()).hexdigest()
         return Recommendation(key, kind, relation, change, reason,
             {"query_id": q.query_id, "mean_exec_time_ms": q.mean_exec_time_ms, "total_exec_time_ms": q.total_exec_time_ms, "calls": q.calls, "query_frequency_per_minute": q.query_frequency_per_minute, "shared_blks_read": q.shared_blks_read, "columns": columns},
@@ -144,8 +149,17 @@ class IndexAdvisor:
 
     @staticmethod
     def _dedupe(items: list[Recommendation]) -> list[Recommendation]:
-        seen = set(); out = []
+        seen: dict[str, Recommendation] = {}
+        out: list[Recommendation] = []
         for item in items:
             if item.key not in seen:
-                seen.add(item.key); out.append(item)
+                seen[item.key] = item
+                out.append(item)
+            else:
+                existing = seen[item.key]
+                existing_qids = {q.get("query_id") for q in existing.affected_queries if isinstance(q, dict)}
+                for q in item.affected_queries:
+                    if isinstance(q, dict) and q.get("query_id") not in existing_qids:
+                        existing.affected_queries.append(q)
+                        existing_qids.add(q.get("query_id"))
         return out

@@ -105,6 +105,7 @@ export function SlowQueries() {
 
   const handleSimulateInTrace = async (recId: number) => {
     setIsSimulating(true)
+    setTraceError(null)
     try {
       await createSimulation(recId, 3)
       if (selectedTraceId) {
@@ -112,7 +113,7 @@ export function SlowQueries() {
         setTraceData(refreshed)
       }
     } catch (err: any) {
-      alert(`Simulation failed: ${err.message}`)
+      setTraceError(`Simulation failed: ${err.message}`)
     } finally {
       setIsSimulating(false)
     }
@@ -120,6 +121,7 @@ export function SlowQueries() {
 
   const handleApproveInTrace = async (recId: number) => {
     setIsDeciding(true)
+    setTraceError(null)
     try {
       await approveRecommendation(recId, 'Approved via Slow Queries trace')
       if (selectedTraceId) {
@@ -128,7 +130,7 @@ export function SlowQueries() {
       }
       fetchQueries()
     } catch (err: any) {
-      alert(`Approval failed: ${err.message}`)
+      setTraceError(`Approval failed: ${err.message}`)
     } finally {
       setIsDeciding(false)
     }
@@ -136,6 +138,7 @@ export function SlowQueries() {
 
   const handleRejectInTrace = async (recId: number) => {
     setIsDeciding(true)
+    setTraceError(null)
     try {
       await rejectRecommendation(recId, 'Rejected via Slow Queries trace')
       if (selectedTraceId) {
@@ -144,7 +147,7 @@ export function SlowQueries() {
       }
       fetchQueries()
     } catch (err: any) {
-      alert(`Rejection failed: ${err.message}`)
+      setTraceError(`Rejection failed: ${err.message}`)
     } finally {
       setIsDeciding(false)
     }

@@ -33,6 +33,12 @@ def _explain_sql(db: Session, sql: str) -> Any:
     if first not in {"SELECT", "WITH", "VALUES"}:
         raise HTTPException(status_code=400, detail="only_select_or_with_queries_are_supported")
 
+    if first in {"SELECT", "WITH"}:
+        from app.services.rewriter.safety import SQLRewriteSafetyPolicy
+        is_safe, reason = SQLRewriteSafetyPolicy.check_query_safety(stripped)
+        if not is_safe:
+            raise HTTPException(status_code=400, detail=f"unsafe_sql: {reason}")
+
     if db.bind and db.bind.dialect.name != "postgresql":
         return [{
             "Plan": {
@@ -62,11 +68,12 @@ def _explain_sql(db: Session, sql: str) -> Any:
         except Exception:
             pass
 
-    # EXPLAIN without ANALYZE plans the statement but does not execute it.
+    # EXPLAIN without ANALYZE plans the statement inside a read-only transaction with strict timeout.
     try:
         with db.begin_nested():
             if db.bind and db.bind.dialect.name == "postgresql":
-                db.execute(text("SET LOCAL statement_timeout = '5000ms'"))
+                db.execute(text("SET LOCAL statement_timeout = '3000ms'"))
+                db.execute(text("SET LOCAL default_transaction_read_only = on"))
             result = db.execute(text(f"EXPLAIN (FORMAT JSON) {stripped}"))
             row = result.scalar_one()
     except Exception as exc:
@@ -94,8 +101,16 @@ def _response(row: PlanAnalysis) -> PlanAnalysisResponse:
     )
 
 
+from app.core.auth import require_analyst, require_viewer
+from app.core.security import TokenPayload
+
+
 @router.post("/analyze", response_model=PlanAnalysisResponse)
-def analyze(request: PlanAnalyzeRequest, db: Session = Depends(get_db)) -> PlanAnalysisResponse:
+def analyze(
+    request: PlanAnalyzeRequest,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
+) -> PlanAnalysisResponse:
     query_id: int | None = None
     raw_plan: Any = None
 
@@ -220,7 +235,11 @@ def analyze(request: PlanAnalyzeRequest, db: Session = Depends(get_db)) -> PlanA
 
 
 @router.get("/{analysis_id}", response_model=PlanAnalysisResponse)
-def get_analysis(analysis_id: int, db: Session = Depends(get_db)) -> PlanAnalysisResponse:
+def get_analysis(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> PlanAnalysisResponse:
     row = db.get(PlanAnalysis, analysis_id)
     if row is None:
         raise HTTPException(status_code=404, detail="plan_analysis_not_found")

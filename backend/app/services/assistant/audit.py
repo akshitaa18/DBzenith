@@ -13,6 +13,18 @@ class AssistantAuditLogger:
     def __init__(self) -> None:
         self._audit_records: list[dict[str, Any]] = []
         self._conversations: dict[str, list[dict[str, str]]] = {}
+        self._session_owners: dict[str, str] = {}
+
+    def bind_session_owner(self, session_id: str, owner_id: str) -> bool:
+        """Binds a session to its creating user_id or returns False if owned by a different user."""
+        existing = self._session_owners.get(session_id)
+        if existing is not None and existing != str(owner_id):
+            return False
+        self._session_owners[session_id] = str(owner_id)
+        return True
+
+    def get_session_owner(self, session_id: str) -> str | None:
+        return self._session_owners.get(session_id)
 
     def log_event(
         self,
@@ -64,3 +76,4 @@ def get_assistant_audit_logger() -> AssistantAuditLogger:
     if _audit_logger_instance is None:
         _audit_logger_instance = AssistantAuditLogger()
     return _audit_logger_instance
+
