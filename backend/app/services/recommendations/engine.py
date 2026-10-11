@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.lifecycle import LifecycleState, build_observation_window_metrics
 from app.core.provenance import (
     ProvenanceState,
     compute_query_fingerprint,
@@ -76,6 +77,37 @@ class RecommendationEngine:
                 if matched_stats
                 else None
             )
+            baseline_payload = None
+            if matched_stats:
+                q0 = matched_stats[0]
+                snap0 = getattr(q0, "snapshot", None)
+                cap_at = q0.captured_at or (getattr(snap0, "captured_at", None) if snap0 is not None else None)
+                win_sec = q0.window_seconds or (getattr(snap0, "window_seconds", None) if snap0 is not None else 60.0)
+                baseline_payload = build_observation_window_metrics(
+                    query_id=q0.query_id,
+                    normalized_query=q0.normalized_query,
+                    query_fingerprint=q_fp,
+                    captured_at=cap_at,
+                    window_seconds=win_sec,
+                    calls=q0.calls,
+                    mean_exec_time_ms=q0.mean_exec_time_ms,
+                    min_exec_time_ms=q0.min_exec_time_ms,
+                    max_exec_time_ms=q0.max_exec_time_ms,
+                    total_exec_time_ms=q0.total_exec_time_ms,
+                    rows=q0.rows,
+                    shared_blks_hit=q0.shared_blks_hit,
+                    shared_blks_read=q0.shared_blks_read,
+                    temp_blks_read=q0.temp_blks_read,
+                    temp_blks_written=q0.temp_blks_written,
+                    blk_read_time_ms=q0.blk_read_time_ms,
+                    blk_write_time_ms=q0.blk_write_time_ms,
+                    query_frequency_per_minute=q0.query_frequency_per_minute,
+                    source_identifier=source_id,
+                    provenance_state=prov_state if is_syn else (q0.provenance_state or ProvenanceState.LIVE_TELEMETRY.value),
+                    is_synthetic=is_syn,
+                    is_measured=not is_syn,
+                    environment="synthetic_demo" if is_syn else "production",
+                )
             model_ver = "advisor-engine-v0.7.0"
             evidence_payload = dict(rec.evidence or {})
             evidence_payload.setdefault("provenance_state", prov_state)
@@ -95,6 +127,12 @@ class RecommendationEngine:
                 affected_queries=rec.affected_queries,
                 requires_approval=rec.requires_approval,
                 status="pending",
+                lifecycle_state=(
+                    LifecycleState.AWAITING_APPROVAL.value
+                    if rec.requires_approval
+                    else LifecycleState.PROPOSED.value
+                ),
+                baseline_metrics=baseline_payload,
                 provenance_state=prov_state,
                 source_identifier=source_id,
                 query_fingerprint=q_fp,

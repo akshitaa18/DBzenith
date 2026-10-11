@@ -9,6 +9,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.lifecycle import ensure_lifecycle_schema
 from app.core.provenance import ensure_provenance_schema
 from app.db.base import Base
 from app.db.session import get_engine
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI):
         engine = get_engine()
         Base.metadata.create_all(bind=engine)
         ensure_provenance_schema(engine)
+        ensure_lifecycle_schema(engine)
         auto_seed_if_empty()
     except Exception as exc:
         logger.warning(f"Database auto-seed / table initialization skipped: {exc}")

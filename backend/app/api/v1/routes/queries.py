@@ -1,5 +1,6 @@
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_analyst, require_viewer
@@ -8,6 +9,7 @@ from app.core.provenance import (
     ProvenanceBadgeLabel,
     ProvenanceState,
     badge_for_state,
+    compute_query_fingerprint,
     sanitize_source_identifier,
 )
 from app.core.security import TokenPayload
@@ -17,12 +19,31 @@ from app.schemas.telemetry import PaginatedQueries, QueryDetail
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
+_SORT_COLUMN_MAP = {
+    "mean_exec_time_ms": QueryStatistic.mean_exec_time_ms,
+    "total_exec_time_ms": QueryStatistic.total_exec_time_ms,
+    "calls": QueryStatistic.calls,
+    "rows": QueryStatistic.rows,
+    "shared_blks_read": QueryStatistic.shared_blks_read,
+    "query_frequency_per_minute": QueryStatistic.query_frequency_per_minute,
+}
 
-def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 100.0):
+
+def _latest_query_rows(
+    db: Session,
+    slow_only: bool = False,
+    threshold: float = 100.0,
+    sort_by: str = "mean_exec_time_ms",
+    sort_dir: str = "desc",
+):
     latest = select(
         QueryStatistic.query_id,
         func.max(QueryStatistic.id).label("max_id"),
     ).group_by(QueryStatistic.query_id).subquery()
+
+    sort_col = _SORT_COLUMN_MAP.get(sort_by, QueryStatistic.mean_exec_time_ms)
+    primary_order = asc(sort_col) if sort_dir == "asc" else desc(sort_col)
+
     stmt = (
         select(QueryStatistic)
         .join(latest, QueryStatistic.id == latest.c.max_id)
@@ -62,11 +83,12 @@ def _latest_query_rows(db: Session, slow_only: bool = False, threshold: float = 
             ~QueryStatistic.normalized_query.ilike("ANALYZE %"),
             ~QueryStatistic.normalized_query.ilike("VACUUM %"),
         )
-        .order_by(desc(QueryStatistic.mean_exec_time_ms), desc(QueryStatistic.calls))
+        .order_by(primary_order, desc(QueryStatistic.calls), desc(QueryStatistic.id))
     )
     if slow_only:
         stmt = stmt.where(QueryStatistic.mean_exec_time_ms >= threshold)
     return stmt
+
 
 
 def _get_optimization_summaries_for_queries(db: Session, stat_rows: list) -> dict[int, dict]:
@@ -226,17 +248,83 @@ def slow_queries(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     min_mean_ms: float | None = Query(None, ge=0),
+    max_mean_ms: float | None = Query(None, ge=0),
+    severity: str | None = Query(None, pattern="^(critical|high|moderate|all)$"),
     database_name: str | None = Query(None),
     user_name: str | None = Query(None),
+    query_fingerprint: str | None = Query(None),
+    search: str | None = Query(None),
+    window_seconds: float | None = Query(None, gt=0),
+    sort_by: str = Query(
+        "mean_exec_time_ms",
+        pattern="^(mean_exec_time_ms|total_exec_time_ms|calls|rows|shared_blks_read|query_frequency_per_minute)$",
+    ),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     _user: TokenPayload = Depends(require_viewer),
 ) -> PaginatedQueries:
-    threshold = min_mean_ms if min_mean_ms is not None else get_settings().slow_query_threshold_ms
-    base = _latest_query_rows(db, slow_only=True, threshold=threshold)
-    if database_name:
-        base = base.where(QueryStatistic.database_name == database_name)
-    if user_name:
-        base = base.where(QueryStatistic.user_name == user_name)
+    if min_mean_ms is not None:
+        threshold = min_mean_ms
+    elif severity == "moderate":
+        threshold = 0.0
+    else:
+        threshold = get_settings().slow_query_threshold_ms
+
+    base = _latest_query_rows(
+        db,
+        slow_only=True,
+        threshold=threshold,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
+    if max_mean_ms is not None:
+        base = base.where(QueryStatistic.mean_exec_time_ms <= max_mean_ms)
+    if severity == "critical":
+        base = base.where(QueryStatistic.mean_exec_time_ms >= 150.0)
+    elif severity == "high":
+        base = base.where(
+            QueryStatistic.mean_exec_time_ms >= 80.0,
+            QueryStatistic.mean_exec_time_ms < 150.0,
+        )
+    elif severity == "moderate":
+        base = base.where(QueryStatistic.mean_exec_time_ms < 80.0)
+
+    if database_name and database_name.strip():
+        base = base.where(QueryStatistic.database_name.ilike(f"%{database_name.strip()}%"))
+    if user_name and user_name.strip():
+        base = base.where(QueryStatistic.user_name == user_name.strip())
+    if query_fingerprint and query_fingerprint.strip():
+        fp = query_fingerprint.strip()
+        base = base.where(QueryStatistic.query_fingerprint.ilike(f"%{fp}%"))
+    if search and search.strip():
+        term = search.strip()
+        conds = [
+            QueryStatistic.normalized_query.ilike(f"%{term}%"),
+            QueryStatistic.query_fingerprint.ilike(f"%{term}%"),
+            QueryStatistic.database_name.ilike(f"%{term}%"),
+        ]
+        if term.lstrip("-").isdigit():
+            conds.append(QueryStatistic.query_id == int(term))
+        base = base.where(or_(*conds))
+    if window_seconds is not None:
+        latest_cap = db.scalar(select(func.max(WorkloadSnapshot.captured_at)))
+        if latest_cap is not None:
+            cutoff = latest_cap - timedelta(seconds=float(window_seconds))
+            base = base.where(
+                or_(
+                    QueryStatistic.window_seconds <= float(window_seconds),
+                    QueryStatistic.captured_at >= cutoff,
+                    QueryStatistic.window_seconds.is_(None),
+                )
+            )
+        else:
+            base = base.where(
+                or_(
+                    QueryStatistic.window_seconds <= float(window_seconds),
+                    QueryStatistic.window_seconds.is_(None),
+                )
+            )
+
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.scalars(base.offset((page - 1) * page_size).limit(page_size)).all()
     summaries = _get_optimization_summaries_for_queries(db, list(rows))
@@ -254,6 +342,7 @@ def slow_queries(
         page_size=page_size,
         total=total,
     )
+
 
 
 @router.post("/calculate-optimizations")
@@ -570,12 +659,58 @@ def query_optimization_trace(
         }
 
     latest_snap_id = db.scalar(select(func.max(WorkloadSnapshot.id)))
+    history_rows = (
+        db.query(QueryStatistic)
+        .filter(QueryStatistic.query_id == effective_query_id)
+        .order_by(QueryStatistic.id.desc())
+        .limit(20)
+        .all()
+    )
+    telemetry_history = []
+    for h in history_rows:
+        snap = getattr(h, "snapshot", None)
+        cap_at = h.captured_at or (getattr(snap, "captured_at", None) if snap is not None else None)
+        prov = h.provenance_state or (getattr(snap, "provenance_state", None) if snap is not None else None)
+        if not prov:
+            prov = (
+                ProvenanceState.SYNTHETIC_DEMO.value
+                if h.is_synthetic
+                else (
+                    ProvenanceState.LIVE_TELEMETRY.value
+                    if (latest_snap_id is None or h.snapshot_id == latest_snap_id)
+                    else ProvenanceState.HISTORICAL_OBSERVATION.value
+                )
+            )
+        telemetry_history.append(
+            {
+                "id": h.id,
+                "snapshot_id": h.snapshot_id,
+                "captured_at": cap_at.isoformat() if cap_at else None,
+                "window_seconds": h.window_seconds or (getattr(snap, "window_seconds", None) if snap is not None else None),
+                "calls": h.calls,
+                "mean_exec_time_ms": round(float(h.mean_exec_time_ms), 2),
+                "total_exec_time_ms": round(float(h.total_exec_time_ms), 2),
+                "min_exec_time_ms": round(float(h.min_exec_time_ms), 2),
+                "max_exec_time_ms": round(float(h.max_exec_time_ms), 2),
+                "rows": h.rows,
+                "shared_blks_hit": h.shared_blks_hit,
+                "shared_blks_read": h.shared_blks_read,
+                "provenance_state": prov,
+                "provenance_badge": badge_for_state(prov),
+                "is_synthetic": bool(h.is_synthetic),
+                "is_measured": bool(h.is_measured and not h.is_synthetic),
+            }
+        )
+
     return {
+        "query_id": row.query_id,
+        "snapshot_id": row.snapshot_id,
         "query": QueryDetail.from_model(
             row,
             opt_summary,
             is_latest=(latest_snap_id is None or row.snapshot_id == latest_snap_id),
         ).model_dump(),
+        "telemetry_history": telemetry_history,
         "matching_recommendations": [RecommendationResponse.model_validate(r).model_dump() for r in matching_recs],
         "latest_simulation": sim_data,
         "plan_analysis": PlanAnalysisResponse(
@@ -606,3 +741,4 @@ def query_optimization_trace(
             for e in audit_events
         ],
     }
+

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { analyzePlan, getPlanAnalysis, getQueryDetail, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
+import { PlanComparisonWorkbench } from '../components/PlanComparisonWorkbench'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
 import { useAuth } from '../context/AuthContext'
@@ -294,6 +295,17 @@ export function PlanViewer() {
           />
         </>
       )}
+
+      <PlanComparisonWorkbench
+        initialQueryId={searchParams.get('queryId')}
+        initialRecommendationId={searchParams.get('recId') ? Number(searchParams.get('recId')) : undefined}
+        initialSimulationId={searchParams.get('simId') ? Number(searchParams.get('simId')) : undefined}
+        initialBaselineSql={sql}
+        initialCandidateSql={rewriteResult?.rewritten_query || undefined}
+        initialCandidateIndexDdl={searchParams.get('indexDdl') || undefined}
+        initialBaselinePlan={analysis?.sanitized_plan}
+        canRunBenchmark={canSimulate}
+      />
     </section>
   )
 }

@@ -256,6 +256,20 @@ export function QueryDetails() {
       : null)
 
   const gnnSummaryText = (gnnAnalysis?.explanation as any)?.gnn_summary || gnnAnalysis?.explanation?.summary
+  const returnToParam = searchParams.get('returnTo')
+  const savedSlowFilters = (() => {
+    try {
+      return typeof window !== 'undefined' ? window.sessionStorage.getItem('dbzenith_slow_queries_filters') : null
+    } catch {
+      return null
+    }
+  })()
+  const backToSlowQueriesHref =
+    returnToParam && returnToParam.startsWith('/slow-queries')
+      ? returnToParam
+      : savedSlowFilters
+      ? `/slow-queries?${savedSlowFilters}`
+      : '/slow-queries'
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -264,6 +278,14 @@ export function QueryDetails() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+              <Link
+                to={backToSlowQueriesHref}
+                data-testid="back-to-slow-queries-link"
+                className="btn btn-secondary btn-sm"
+                style={{ textDecoration: 'none', fontSize: '11px', padding: '3px 10px' }}
+              >
+                ← Back to Slow Queries
+              </Link>
               {detail && (
                 <ProvenanceBadge
                   badge={detail.provenance_badge}
@@ -278,13 +300,14 @@ export function QueryDetails() {
             </div>
             <h1 style={{ fontSize: '2.1rem', margin: 0, fontWeight: 700 }}>Query Performance Details</h1>
             <p className="subtitle" style={{ fontSize: '0.95rem', color: '#94a3b8', margin: '4px 0 0 0' }}>
-              Central entry point for query telemetry inspection, privacy-preserved GNN bottleneck analysis, and safe sandbox optimization.
+              Consolidated query metadata, normalized SQL, provenance, execution plans, telemetry history, and linked recommendations.
             </p>
           </div>
           {detail && (
             <button
+              type="button"
               onClick={handleRefresh}
-              className="btn-secondary"
+              className="btn btn-secondary"
               style={{ fontSize: '12px', padding: '6px 14px' }}
               disabled={loading}
             >
@@ -305,15 +328,18 @@ export function QueryDetails() {
             <span className="badge badge-observed">STAGE 2 & 3</span>
           </div>
           <p className="guide-banner-desc">
-            Inspect raw execution stats, buffer cache hit rates, EXPLAIN plan nodes, and simulated optimization deltas. Review the dedicated <strong>Before vs After Optimization</strong> card below to evaluate HypoPG virtual index speedups and send approved changes to the Human Approval Center.
+            Inspect raw execution stats, buffer cache hit rates, EXPLAIN plan nodes, historical telemetry snapshots, and linked recommendations.
           </p>
         </div>
       </div>
 
       {/* Query Search / Selection Bar */}
       <form onSubmit={handleLookup} className="card filter-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0' }}>Query Identifier:</label>
+        <label htmlFor="query-id-lookup-input" style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0' }}>
+          Query Identifier:
+        </label>
         <input
+          id="query-id-lookup-input"
           type="text"
           className="filter-input"
           style={{ width: '280px', fontFamily: 'monospace', fontSize: '13px' }}
@@ -321,17 +347,31 @@ export function QueryDetails() {
           onChange={(e) => setQueryIdInput(e.target.value)}
           placeholder="e.g. -7683565032435896730 or row ID"
         />
-        <button type="submit" className="primary-button" style={{ padding: '8px 18px' }} disabled={loading}>
+        <button type="submit" className="btn btn-primary" style={{ padding: '8px 18px' }} disabled={loading}>
           {loading ? 'Inspecting...' : 'Inspect Query'}
         </button>
         {detail && (
-          <span style={{ fontSize: '12px', color: '#64748b' }}>
-            Viewing Query #{detail.query_id} • Source: <code>{detail.source_identifier || detail.database_name || 'dbzenith'}</code> • Captured: <strong>{formatCollectionTimestamp(detail.captured_at)}</strong>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+            Viewing Query #{detail.query_id} • Database: <code>{detail.database_name || 'default'}</code> • Role: <code>{detail.user_name || 'postgres'}</code> • Source: <code>{detail.source_identifier || 'dbzenith'}</code> • Captured: <strong>{formatCollectionTimestamp(detail.captured_at)}</strong>
           </span>
         )}
       </form>
 
-      {error && <div className="alert">{error}</div>}
+      {error && (
+        <div
+          className="alert"
+          role="alert"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}
+        >
+          <span>{error}</span>
+          {queryIdInput && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => loadQuery(queryIdInput, true)}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
 
       {detail && (
         <>
@@ -882,6 +922,144 @@ export function QueryDetails() {
           )}
 
           {/* ======================================================== */}
+          {/* SECTION F2: TELEMETRY HISTORY & LINKED RECOMMENDATIONS   */}
+          {/* ======================================================== */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px' }}>
+            {/* Telemetry History Across Snapshots */}
+            <article className="card" data-testid="query-telemetry-history-card" style={{ padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>
+                    Telemetry History Across Snapshots
+                  </h3>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    Historical observations captured for Query #{detail.query_id}
+                  </span>
+                </div>
+                <span className="badge badge-observed">
+                  {(traceData?.telemetry_history?.length ?? 1)} Snapshots
+                </span>
+              </div>
+              {traceData?.telemetry_history && traceData.telemetry_history.length > 0 ? (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Snapshot</th>
+                        <th>Captured At</th>
+                        <th>Calls</th>
+                        <th>Mean Latency</th>
+                        <th>Reads / Hits</th>
+                        <th>Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {traceData.telemetry_history.slice(0, 8).map((h) => (
+                        <tr key={h.id}>
+                          <td><code>#{h.snapshot_id}</code></td>
+                          <td style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            {formatCollectionTimestamp(h.captured_at)}
+                          </td>
+                          <td>{h.calls.toLocaleString()}</td>
+                          <td>
+                            <strong style={{ color: h.mean_exec_time_ms > 100 ? '#fca5a5' : '#6ee7b7' }}>
+                              {formatMs(h.mean_exec_time_ms)}
+                            </strong>
+                          </td>
+                          <td style={{ fontSize: '11px', fontFamily: 'monospace' }}>
+                            {h.shared_blks_read.toLocaleString()} / {h.shared_blks_hit.toLocaleString()}
+                          </td>
+                          <td>
+                            <ProvenanceBadge
+                              badge={h.provenance_badge}
+                              state={h.provenance_state}
+                              isSynthetic={h.is_synthetic}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#94a3b8', padding: '12px', background: '#090d16', borderRadius: '6px' }}>
+                  Current observation Snapshot: {detail.calls.toLocaleString()} calls, {formatMs(detail.mean_exec_time_ms)} mean latency ({formatCollectionTimestamp(detail.captured_at)}).
+                </div>
+              )}
+            </article>
+
+            {/* Linked Optimization Recommendations */}
+            <article className="card" data-testid="query-linked-recommendations-card" style={{ padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>
+                    Linked Optimization Recommendations
+                  </h3>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    Advisor candidates targeting this query fingerprint or relation
+                  </span>
+                </div>
+                <Link to="/recommendations" className="btn btn-secondary btn-sm" style={{ textDecoration: 'none', fontSize: '11px' }}>
+                  All Recommendations →
+                </Link>
+              </div>
+              {traceData?.matching_recommendations && traceData.matching_recommendations.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {traceData.matching_recommendations.map((rec) => (
+                    <div
+                      key={rec.id}
+                      style={{
+                        padding: '10px 12px',
+                        background: '#090d16',
+                        border: '1px solid #1e293b',
+                        borderRadius: '6px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div>
+                          <strong style={{ color: '#f8fafc', fontSize: '13px' }}>#{rec.id}</strong>{' '}
+                          <span className="badge" style={{ background: '#1e293b', color: '#38bdf8', fontSize: '10px' }}>
+                            {rec.type}
+                          </span>{' '}
+                          <code style={{ fontSize: '12px', color: '#cbd5e1' }}>{rec.target}</code>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span className="badge badge-warning" style={{ fontSize: '10px' }}>
+                            {(rec.lifecycle_state || rec.status).toUpperCase().replace(/_/g, ' ')}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 700 }}>
+                            {rec.expected_benefit}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                        {rec.reason}
+                      </div>
+                      <pre
+                        style={{
+                          margin: '6px 0 0 0',
+                          padding: '6px 8px',
+                          background: '#050811',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          color: '#a78bfa',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {rec.proposed_change}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#94a3b8', padding: '12px', background: '#090d16', borderRadius: '6px' }}>
+                  No linked recommendations found yet for this query. Click "Calculate Before/After Optimization" above to synthesize advisor candidates.
+                </div>
+              )}
+            </article>
+          </div>
+
+          {/* ======================================================== */}
           {/* SECTION G: OPTIMIZATION TRACE & SANDBOX SIMULATION       */}
           {/* ======================================================== */}
           <OptimizationTrace
@@ -914,6 +1092,7 @@ export function QueryDetails() {
           />
         </>
       )}
+
 
       {!detail && !loading && (
         <article className="card section-card" style={{ marginTop: '20px', textAlign: 'center', padding: '40px 20px' }}>

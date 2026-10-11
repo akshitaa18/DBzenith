@@ -5,7 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 from app.core.provenance import ProvenanceBadgeLabel, ProvenanceState, badge_for_state
 
 
@@ -51,3 +50,47 @@ class PlanAnalysisResponse(BaseModel):
         else:
             self.provenance_badge = badge_for_state(self.provenance_state)
         return self
+
+
+class PlanCompareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_plan: dict[str, Any] | list[Any] | None = None
+    candidate_plan: dict[str, Any] | list[Any] | None = None
+    query_id: int | str | None = None
+    simulation_id: int | None = None
+    recommendation_id: int | None = None
+    baseline_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_index_ddl: str | None = Field(default=None, max_length=10_000)
+
+
+class SafeBenchmarkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_index_ddl: str | None = Field(default=None, max_length=10_000)
+    query_id: int | str | None = None
+    recommendation_id: int | None = None
+    baseline_plan: dict[str, Any] | list[Any] | None = None
+    candidate_plan: dict[str, Any] | list[Any] | None = None
+    parameters: dict[str, Any] | list[Any] | None = None
+    warmup_runs: int = Field(default=1, ge=0, le=5)
+    benchmark_runs: int = Field(default=3, ge=1, le=10)
+    statement_timeout_ms: int = Field(default=3000, ge=50, le=15000)
+    run_id: str | None = Field(default=None, max_length=128)
+    pre_cancelled: bool = False
+
+
+class PlanExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: str = Field(default="json", pattern="^(json|csv|JSON|CSV)$")
+    comparison: dict[str, Any] | None = None
+    baseline_plan: dict[str, Any] | list[Any] | None = None
+    candidate_plan: dict[str, Any] | list[Any] | None = None
+    baseline_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_sql: str | None = Field(default=None, max_length=500_000)
+    candidate_index_ddl: str | None = Field(default=None, max_length=10_000)
+    recommendation_id: int | None = None

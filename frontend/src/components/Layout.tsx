@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { seedDemoWorkload, type UserRole } from '../lib/api'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { getSystemDiagnostics, seedDemoWorkload, type SystemDiagnostics, type UserRole } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 
 interface NavSection {
@@ -52,8 +52,23 @@ const NAV_SECTIONS: NavSection[] = [
 export function Layout() {
   const [seeding, setSeeding] = useState(false)
   const [seedNotice, setSeedNotice] = useState<string | null>(null)
+  const [diag, setDiag] = useState<SystemDiagnostics | null>(null)
   const { user, logout, canApprove, hasMinRole } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    let mounted = true
+    getSystemDiagnostics()
+      .then((res) => {
+        if (mounted) setDiag(res)
+      })
+      .catch(() => {
+        // Diagnostics optional in layout shell; individual pages handle explicit errors
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const handleSignOut = async () => {
     await logout('manual')
@@ -76,15 +91,41 @@ export function Layout() {
     }
   }
 
+  const dbConnected = diag
+    ? (diag.database?.connected ?? (diag as any).primary_database?.connected ?? true)
+    : true
+  const telemetryStatus =
+    diag?.telemetry?.latest_collection_status ||
+    (diag as any)?.collector?.status ||
+    'active'
+  const isDemoTelemetry = Boolean(diag?.telemetry?.is_synthetic_active)
+  const dsnLabel =
+    diag?.database?.connection_summary?.dsn_masked ||
+    (diag as any)?.primary_database?.dsn_masked ||
+    'Configured PostgreSQL Target'
+  const sandboxModeLabel = diag?.sandbox?.mode
+    ? diag.sandbox.mode.replace(/_/g, ' ')
+    : 'Read-Only / Virtual Index Sandbox'
+
   return (
     <div className="app-shell">
       {/* Platform Header */}
       <header className="topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div className="brand" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '0.02em' }}>
+          <Link
+            to="/"
+            className="brand"
+            style={{
+              fontSize: '1.25rem',
+              fontWeight: 800,
+              color: '#f8fafc',
+              letterSpacing: '0.02em',
+              textDecoration: 'none',
+            }}
+          >
             <span style={{ fontSize: '1.4rem' }}>⚡</span>
             <span>DBZenith</span>
-          </div>
+          </Link>
           <span
             style={{
               fontSize: '0.72rem',
@@ -103,15 +144,43 @@ export function Layout() {
 
         {/* Global Live Engine Badges & Authenticated Identity */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="badge badge-observed" title="Observes PostgreSQL telemetry via pg_stat_statements">
-            <span>●</span> TELEMETRY ACTIVE
-          </span>
-          <span className="badge badge-ai-analysis" title="GNN graph representation & RL policy">
+          <Link
+            to="/health"
+            className={`badge ${
+              !dbConnected || telemetryStatus === 'error'
+                ? 'badge-danger'
+                : isDemoTelemetry
+                ? 'badge-warning'
+                : 'badge-observed'
+            }`}
+            style={{ textDecoration: 'none' }}
+            title="Inspect live telemetry collector and database connectivity on System Health"
+          >
+            <span>●</span>{' '}
+            {!dbConnected
+              ? 'DB OFFLINE'
+              : telemetryStatus === 'error'
+              ? 'COLLECTOR DEGRADED'
+              : isDemoTelemetry
+              ? 'DEMO TELEMETRY'
+              : 'TELEMETRY ACTIVE'}
+          </Link>
+          <Link
+            to="/gnn"
+            className="badge badge-ai-analysis"
+            style={{ textDecoration: 'none' }}
+            title="GNN graph representation & RL policy"
+          >
             <span>●</span> GNN INFERENCE
-          </span>
-          <span className="badge badge-simulation" title="HypoPG virtual index sandbox with zero table locks">
-            <span>●</span> HYPOPG SANDBOX
-          </span>
+          </Link>
+          <Link
+            to="/simulations"
+            className="badge badge-simulation"
+            style={{ textDecoration: 'none' }}
+            title="Safe execution-plan comparison and HypoPG virtual index sandbox"
+          >
+            <span>●</span> SANDBOX READY
+          </Link>
           <span className="badge badge-approval-required" title="Mandatory Human Approval Gate enforced">
             <span>●</span> HUMAN GATE ACTIVE
           </span>
@@ -197,6 +266,7 @@ export function Layout() {
           <span>✓ {seedNotice}</span>
           <button
             onClick={() => setSeedNotice(null)}
+            aria-label="Dismiss notification"
             style={{ background: 'transparent', border: 'none', color: '#34d399', cursor: 'pointer', fontSize: '14px' }}
           >
             ✕
@@ -270,7 +340,7 @@ export function Layout() {
       </nav>
 
       {/* Main Content Area */}
-      <main className="content" style={{ maxWidth: '1360px', margin: '0 auto', padding: '24px 20px', flex: 1 }}>
+      <main className="content" style={{ maxWidth: '1360px', width: '100%', boxSizing: 'border-box', margin: '0 auto', padding: '24px 20px', flex: 1 }}>
         <Outlet />
       </main>
 
@@ -285,14 +355,25 @@ export function Layout() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px',
         }}
       >
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
           <span>DBZenith v0.7 — Self-Driving PostgreSQL Optimization</span>
           <span>•</span>
-          <span>Target DB: PostgreSQL 16 (localhost:5432/dbzenith)</span>
+          <span>
+            Target DB:{' '}
+            <strong style={{ color: dbConnected ? '#cbd5e1' : '#fca5a5' }}>
+              {diag
+                ? `${diag.database?.server_version ?? diag.primary_database?.version ?? 'PostgreSQL 16.x'} (${dsnLabel})`
+                : dsnLabel}
+            </strong>
+          </span>
           <span>•</span>
-          <span>HypoPG Virtual Index Engine: Active</span>
+          <span>
+            Sandbox Mode: <strong style={{ color: '#cbd5e1' }}>{sandboxModeLabel}</strong>
+          </span>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <span className="badge badge-observed" style={{ fontSize: '10px' }}>READ-ONLY TELEMETRY</span>
@@ -302,3 +383,4 @@ export function Layout() {
     </div>
   )
 }
+

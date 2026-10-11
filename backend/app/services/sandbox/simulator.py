@@ -76,6 +76,9 @@ class SandboxSimulator:
                 for key, value in result.items():
                     setattr(row, key, value)
                 row.status = "completed"
+                recommendation.candidate_simulation_id = row.id
+                if recommendation.status == "pending":
+                    recommendation.lifecycle_state = "simulated"
                 db.commit()
                 db.refresh(row)
                 return row
@@ -84,6 +87,9 @@ class SandboxSimulator:
                 for key, value in result.items():
                     setattr(row, key, value)
                 row.status = "completed"
+                recommendation.candidate_simulation_id = row.id
+                if recommendation.status == "pending":
+                    recommendation.lifecycle_state = "simulated"
                 db.commit()
                 db.refresh(row)
                 return row
@@ -98,6 +104,9 @@ class SandboxSimulator:
                     "Estimated from planner cost model — not a measured runtime benchmark speedup.",
                     "Zero production disk allocation or table locks were incurred.",
                 ]
+                recommendation.candidate_simulation_id = row.id
+                if recommendation.status == "pending":
+                    recommendation.lifecycle_state = "simulated"
                 db.commit()
                 db.refresh(row)
                 return row
@@ -547,14 +556,15 @@ class SandboxSimulator:
         baseline_latency = 200.0
         if first_q:
             baseline_latency = float(first_q.mean_exec_time_ms or 200.0)
+            est_rows = max(100, int(first_q.rows or 5000))
             if first_q.explain_plan and isinstance(first_q.explain_plan, list) and len(first_q.explain_plan) > 0:
                 p_obj = first_q.explain_plan[0].get("Plan") if isinstance(first_q.explain_plan[0], dict) else None
                 if p_obj and "Total Cost" in p_obj:
                     baseline_cost = float(p_obj["Total Cost"])
                 else:
-                    baseline_cost = round(baseline_latency * 12.5, 2)
+                    baseline_cost = round(est_rows * 0.25, 2)
             else:
-                baseline_cost = round(baseline_latency * 12.5, 2)
+                baseline_cost = round(est_rows * 0.25, 2)
 
         proposed_cost = round(baseline_cost * (1.0 - improvement_pct / 100.0), 2)
         simulated_latency = round(baseline_latency / max(speedup_factor, 1.01), 2)

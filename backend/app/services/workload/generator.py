@@ -28,6 +28,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
+from app.core.lifecycle import LifecycleState, ensure_lifecycle_schema
 from app.core.provenance import (
     ProvenanceState,
     compute_query_fingerprint,
@@ -503,6 +504,7 @@ def generate_comprehensive_workload(db_url: str | None = None, existing_session=
         engine = create_engine(url, pool_pre_ping=True)
         Base.metadata.create_all(bind=engine)
         ensure_provenance_schema(engine)
+        ensure_lifecycle_schema(engine)
         SessionFactory = sessionmaker(bind=engine)
         session = SessionFactory()
     else:
@@ -510,6 +512,7 @@ def generate_comprehensive_workload(db_url: str | None = None, existing_session=
         if session.bind is not None:
             try:
                 ensure_provenance_schema(session.bind)
+                ensure_lifecycle_schema(session.bind)
             except Exception:
                 pass
 
@@ -809,6 +812,10 @@ def generate_comprehensive_workload(db_url: str | None = None, existing_session=
                 model_version="hypopg-analytical-v0.7.0",
             )
             session.add(sim)
+            session.flush()
+            r.candidate_simulation_id = sim.id
+            if r.status == "pending":
+                r.lifecycle_state = LifecycleState.SIMULATED.value
             sim_count += 1
 
         session.commit()
@@ -819,11 +826,19 @@ def generate_comprehensive_workload(db_url: str | None = None, existing_session=
         pending_synthetic = [r for r in synthetic_recs if r.status == "pending"]
         if len(pending_synthetic) > 1:
             pending_synthetic[0].status = "approved"
+            pending_synthetic[0].lifecycle_state = LifecycleState.APPROVED.value
+            pending_synthetic[0].decided_by = "lead_dba"
+            pending_synthetic[0].decided_at = now
+            pending_synthetic[0].decision_reason = "Verified in HypoPG sandbox with 74.5% cost reduction (synthetic demo seed)."
             session.add(RecommendationAuditEvent(
                 recommendation_id=pending_synthetic[0].id,
                 action="APPROVE",
                 previous_status="pending",
                 new_status="approved",
+                previous_lifecycle_state=LifecycleState.SIMULATED.value,
+                new_lifecycle_state=LifecycleState.APPROVED.value,
+                actor_username="lead_dba",
+                actor_role="DBA",
                 reason="Verified in HypoPG sandbox with 74.5% cost reduction (synthetic demo seed).",
                 metadata_json=json.dumps({"operator_role": "DBA", "approved_by": "lead_dba@internal", "is_synthetic": True}),
             ))
@@ -844,11 +859,19 @@ def generate_comprehensive_workload(db_url: str | None = None, existing_session=
 
         if len(pending_synthetic) > 2:
             pending_synthetic[1].status = "rejected"
+            pending_synthetic[1].lifecycle_state = LifecycleState.REJECTED.value
+            pending_synthetic[1].decided_by = "lead_dba"
+            pending_synthetic[1].decided_at = now
+            pending_synthetic[1].decision_reason = "Write overhead exceeds 5% SLA threshold on high-frequency table (synthetic demo seed)."
             session.add(RecommendationAuditEvent(
                 recommendation_id=pending_synthetic[1].id,
                 action="REJECT",
                 previous_status="pending",
                 new_status="rejected",
+                previous_lifecycle_state=LifecycleState.SIMULATED.value,
+                new_lifecycle_state=LifecycleState.REJECTED.value,
+                actor_username="lead_dba",
+                actor_role="DBA",
                 reason="Write overhead exceeds 5% SLA threshold on high-frequency table (synthetic demo seed).",
                 metadata_json=json.dumps({"operator_role": "DBA", "rejected_by": "lead_dba@internal", "is_synthetic": True}),
             ))

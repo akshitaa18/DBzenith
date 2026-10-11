@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getRecommendations, Recommendation, createSimulation, Simulation } from '../lib/api'
+import { getRecommendations, Recommendation, createSimulation, listSimulations, Simulation } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import {
+  RecommendationLifecyclePanel,
+  lifecycleStateBadgeStyle,
+} from '../components/RecommendationLifecyclePanel'
 import {
   EstimateVsMeasuredNotice,
   ProvenanceBadge,
@@ -12,6 +16,7 @@ import { useAuth } from '../context/AuthContext'
 export function RecommendationsPage() {
   const { canSimulate } = useAuth()
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
+  const [simulationsMap, setSimulationsMap] = useState<Record<number, Simulation>>({})
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
@@ -21,6 +26,7 @@ export function RecommendationsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedTraceId, setExpandedTraceId] = useState<number | null>(null)
+  const [expandedLifecycleId, setExpandedLifecycleId] = useState<number | null>(null)
 
   // Side-by-side comparison state
   const [selectedForCompare, setSelectedForCompare] = useState<number[]>([])
@@ -35,9 +41,21 @@ export function RecommendationsPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await getRecommendations(page, pageSize, statusFilter || undefined)
+      const [res, sims] = await Promise.all([
+        getRecommendations(page, pageSize, statusFilter || undefined),
+        listSimulations(100).catch(() => [] as Simulation[]),
+      ])
       setRecommendations(res.items || [])
       setTotal(res.total || 0)
+      const map: Record<number, Simulation> = {}
+      if (Array.isArray(sims)) {
+        for (const s of sims) {
+          if (s.recommendation_id != null && !map[s.recommendation_id]) {
+            map[s.recommendation_id] = s
+          }
+        }
+      }
+      setSimulationsMap(map)
     } catch (err: any) {
       setError(err?.message || 'Failed to load recommendations')
     } finally {
@@ -165,7 +183,7 @@ export function RecommendationsPage() {
         />
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Status:</label>
+          <label style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Status / Lifecycle:</label>
           <select
             className="filter-select"
             value={statusFilter}
@@ -174,10 +192,22 @@ export function RecommendationsPage() {
               setPage(1)
             }}
           >
-            <option value="">All Statuses</option>
+            <option value="">All Statuses & Lifecycle States</option>
             <option value="pending">Pending Approval</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
+            <option value="detected">Lifecycle: Detected</option>
+            <option value="analyzed">Lifecycle: Analyzed</option>
+            <option value="proposed">Lifecycle: Proposed</option>
+            <option value="simulated">Lifecycle: Simulated</option>
+            <option value="awaiting_approval">Lifecycle: Awaiting Approval</option>
+            <option value="ready_for_deployment">Lifecycle: Ready for Deployment</option>
+            <option value="applied">Lifecycle: Applied (Verified)</option>
+            <option value="validation_pending">Lifecycle: Validation Pending</option>
+            <option value="verified_successful">Outcome: Verified Successful</option>
+            <option value="regressed">Outcome: Regressed</option>
+            <option value="failed">Outcome: Failed</option>
+            <option value="inconclusive">Outcome: Inconclusive</option>
           </select>
         </div>
 
@@ -256,8 +286,22 @@ export function RecommendationsPage() {
       )}
 
       {error && (
-        <div className="card" style={{ borderColor: '#ef4444', color: '#fca5a5' }}>
-          Failed to load recommendations: {error}
+        <div
+          className="card"
+          style={{
+            borderColor: '#ef4444',
+            color: '#fca5a5',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>Failed to load recommendations: {error}</span>
+          <button className="btn btn-secondary btn-sm" onClick={loadRecommendations}>
+            Retry
+          </button>
         </div>
       )}
 
@@ -273,6 +317,15 @@ export function RecommendationsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {filteredRecs.map((rec) => {
             const isComparing = selectedForCompare.includes(rec.id)
+            const lifecycleState = rec.lifecycle_state || rec.status
+            const linkedSim =
+              (simulationResult && simulationResult.recommendation_id === rec.id
+                ? simulationResult
+                : simulationsMap[rec.id]) || undefined
+            const evidenceEntries =
+              rec.evidence && typeof rec.evidence === 'object'
+                ? Object.entries(rec.evidence).filter(([, v]) => v != null && v !== '')
+                : []
             return (
               <div
                 key={rec.id}
@@ -314,9 +367,27 @@ export function RecommendationsPage() {
                     >
                       {rec.status.toUpperCase()}
                     </span>
+                    <span
+                      className="badge"
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        padding: '3px 9px',
+                        ...lifecycleStateBadgeStyle(lifecycleState),
+                      }}
+                    >
+                      LIFECYCLE: {lifecycleState.toUpperCase().replace(/_/g, ' ')}
+                    </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '4px 10px', borderColor: '#38bdf8', color: '#38bdf8' }}
+                      onClick={() => setExpandedLifecycleId(expandedLifecycleId === rec.id ? null : rec.id)}
+                    >
+                      {expandedLifecycleId === rec.id ? 'Hide Lifecycle & Impact' : '📊 Lifecycle & Impact Detail'}
+                    </button>
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: '0.75rem', padding: '4px 10px' }}
@@ -366,19 +437,109 @@ export function RecommendationsPage() {
                   </pre>
                 </div>
 
-                {/* Rationale & Expected Benefit */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginTop: '14px' }}>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Rationale</div>
-                    <div style={{ fontSize: '0.875rem', color: '#cbd5e1', marginTop: '4px' }}>{rec.reason}</div>
+                {/* Rationale, Expected Benefit, Simulation Result & Approval Status */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginTop: '14px' }}>
+                  <div style={{ background: '#090d16', padding: '10px 12px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Rationale</div>
+                    <div style={{ fontSize: '0.85rem', color: '#cbd5e1', marginTop: '4px' }}>{rec.reason}</div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Expected Benefit (Unmeasured Estimate)</div>
-                    <div style={{ fontSize: '0.875rem', color: '#34d399', marginTop: '4px', fontWeight: 500 }}>
+                  <div style={{ background: '#090d16', padding: '10px 12px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>
+                      {rec.is_measured ? 'Measured Benefit' : 'Expected Benefit (Planner Estimate)'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#34d399', marginTop: '4px', fontWeight: 600 }}>
                       {rec.expected_benefit}
                     </div>
                   </div>
+                  <div style={{ background: '#090d16', padding: '10px 12px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Simulation Result
+                    </div>
+                    {linkedSim ? (
+                      <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '4px' }}>
+                        <span style={{ color: '#c084fc', fontWeight: 700 }}>Sim #{linkedSim.id}</span> ({linkedSim.status.toUpperCase()}):{' '}
+                        {linkedSim.baseline_cost != null && linkedSim.proposed_cost != null ? (
+                          <span>
+                            {linkedSim.baseline_cost.toFixed(1)} &rarr; {linkedSim.proposed_cost.toFixed(1)} units{' '}
+                            <strong style={{ color: '#34d399' }}>
+                              ({linkedSim.is_measured ? 'Measured' : 'Estimated'})
+                            </strong>
+                          </span>
+                        ) : (
+                          <span>Recorded</span>
+                        )}
+                      </div>
+                    ) : rec.candidate_simulation_id ? (
+                      <div style={{ fontSize: '0.82rem', color: '#c084fc', marginTop: '4px' }}>
+                        Candidate Simulation #{rec.candidate_simulation_id} linked
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '4px' }}>
+                        Not yet simulated in HypoPG sandbox
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ background: '#090d16', padding: '10px 12px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Approval Status
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '4px' }}>
+                      <strong
+                        style={{
+                          color:
+                            rec.status === 'approved'
+                              ? '#34d399'
+                              : rec.status === 'rejected'
+                              ? '#f87171'
+                              : '#fbbf24',
+                        }}
+                      >
+                        {rec.status.toUpperCase()}
+                      </strong>
+                      {rec.decided_by && <span> by {rec.decided_by}</span>}
+                      {rec.decision_reason && (
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
+                          “{rec.decision_reason}”
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
+
+                {/* Supporting Evidence Block */}
+                {evidenceEntries.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: '12px',
+                      padding: '10px 12px',
+                      background: '#090d16',
+                      border: '1px solid #1e293b',
+                      borderRadius: '6px',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>
+                      Supporting Evidence
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {evidenceEntries.slice(0, 8).map(([k, v]) => (
+                        <span
+                          key={k}
+                          style={{
+                            fontSize: '0.75rem',
+                            background: '#0f172a',
+                            border: '1px solid #334155',
+                            padding: '3px 8px',
+                            borderRadius: '4px',
+                            color: '#cbd5e1',
+                          }}
+                        >
+                          <strong style={{ color: '#94a3b8' }}>{k}:</strong>{' '}
+                          <code>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</code>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <EstimateVsMeasuredNotice
                   isMeasured={rec.is_measured}
@@ -409,6 +570,21 @@ export function RecommendationsPage() {
                   <div>
                     Affected Queries: <strong style={{ color: '#cbd5e1' }}>{rec.affected_queries?.length ?? 0}</strong>
                   </div>
+                  {rec.query_fingerprint && (
+                    <div>
+                      Fingerprint: <code style={{ color: '#94a3b8' }}>{rec.query_fingerprint}</code>
+                    </div>
+                  )}
+                  {rec.candidate_simulation_id && (
+                    <div>
+                      Candidate Sim: <code style={{ color: '#c084fc' }}>#{rec.candidate_simulation_id}</code>
+                    </div>
+                  )}
+                  {rec.decided_by && (
+                    <div>
+                      Decided By: <strong style={{ color: '#f8fafc' }}>{rec.decided_by}</strong>
+                    </div>
+                  )}
                   {rec.source_identifier && (
                     <div>
                       Source: <code style={{ color: '#94a3b8' }}>{rec.source_identifier}</code>
@@ -419,13 +595,23 @@ export function RecommendationsPage() {
                   </div>
                 </div>
 
+                {/* Expandable Recommendation Detail & Lifecycle Impact Panel */}
+                {expandedLifecycleId === rec.id && (
+                  <RecommendationLifecyclePanel
+                    recommendationId={rec.id}
+                    initialRecommendation={rec}
+                    onUpdated={() => loadRecommendations()}
+                    onClose={() => setExpandedLifecycleId(null)}
+                  />
+                )}
+
                 {/* Expandable Optimization Trace */}
                 {expandedTraceId === rec.id && (
                   <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #334155' }}>
                     <OptimizationTrace
                       title={`End-to-End Optimization Trace: Recommendation #${rec.id}`}
                       recommendation={rec}
-                      simulation={simulationResult?.recommendation_id === rec.id ? simulationResult : undefined}
+                      simulation={linkedSim}
                       onSimulate={(id) => handleSimulate(id)}
                       isSimulating={simulatingId === rec.id}
                       initialExpanded={true}

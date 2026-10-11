@@ -122,7 +122,7 @@ export function SimulationsPage() {
     return true
   })
 
-  // Extract speedup and simulated latency from benchmark
+  // Extract speedup, sample count, and simulated latency from benchmark
   const getSpeedupFactor = (sim: Simulation): number => {
     if (sim.benchmark && sim.benchmark.speedup_factor) {
       return Number(sim.benchmark.speedup_factor)
@@ -131,7 +131,16 @@ export function SimulationsPage() {
     if (pct > 0 && pct < 99) {
       return Number((1 / (1 - pct / 100)).toFixed(1))
     }
-    return 1.4
+    return 1.0
+  }
+
+  const getSampleCount = (sim: Simulation): number | null => {
+    const b: any = sim.benchmark || {}
+    if (typeof b.runs === 'number') return b.runs
+    if (typeof b.sample_count === 'number') return b.sample_count
+    if (typeof b.iterations === 'number') return b.iterations
+    if (Array.isArray(b.queries) && b.queries.length > 0) return b.queries.length
+    return null
   }
 
   const getSimulatedLatencyMs = (sim: Simulation): number | null => {
@@ -350,8 +359,27 @@ export function SimulationsPage() {
 
       {/* Error state */}
       {error && (
-        <div className="alert">
-          {error}
+        <div
+          className="alert"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}
+        >
+          <span>{error}</span>
+          <button className="btn btn-secondary btn-sm" onClick={loadSimulations}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Loading & Empty states */}
+      {loading && (
+        <div className="card" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+          Loading sandbox simulation records...
+        </div>
+      )}
+
+      {!loading && !error && simulations.length === 0 && (
+        <div className="card empty-state">
+          No sandbox simulations recorded yet. Select a target recommendation above to run a HypoPG sandbox test.
         </div>
       )}
 
@@ -483,7 +511,7 @@ export function SimulationsPage() {
                     <span className="badge badge-simulation">HYPOPG VALIDATED</span>
                   </div>
                   <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '4px' }}>
-                    Linked Recommendation: <strong>#{selectedSim.recommendation_id ?? 'Direct'}</strong> • Source: <code>{selectedSim.source_identifier || 'dbzenith'}</code> • Created: {formatCollectionTimestamp(selectedSim.created_at)}
+                    Linked Recommendation: <strong>#{selectedSim.recommendation_id ?? 'Direct'}</strong> • Source: <code>{selectedSim.source_identifier || 'dbzenith'}</code> • Samples: <strong>{getSampleCount(selectedSim) ?? 1}</strong> • Created: {formatCollectionTimestamp(selectedSim.created_at)}
                   </div>
                 </div>
 
@@ -553,8 +581,8 @@ export function SimulationsPage() {
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
                     {selectedSim.is_measured && getSimulatedLatencyMs(selectedSim) != null
-                      ? `${getSimulatedLatencyMs(selectedSim)}ms vs ${getBaselineLatencyMs(selectedSim) ?? '—'}ms`
-                      : 'Planner cost projection — not a measured benchmark'}
+                      ? `${getSimulatedLatencyMs(selectedSim)}ms vs ${getBaselineLatencyMs(selectedSim) ?? '—'}ms (${getSampleCount(selectedSim) ?? 1} samples)`
+                      : `Planner cost projection (${getSampleCount(selectedSim) ?? 1} pass) — not a measured benchmark`}
                   </div>
                 </div>
 
@@ -625,7 +653,7 @@ export function SimulationsPage() {
               {/* Side-by-Side Visual Execution Plan Comparison */}
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>PLANNER EXECUTION DIFF: BEFORE VS AFTER</span>
+                  <span>PLANNER EXECUTION DIFF: BASELINE VS CANDIDATE PLAN</span>
                   <span className="badge badge-ai-analysis" style={{ fontSize: '10px' }}>OPERATOR TRANSFORMATION</span>
                 </div>
 
@@ -639,16 +667,20 @@ export function SimulationsPage() {
                       <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <span style={{ fontSize: '12px', fontWeight: 700, color: '#f87171' }}>
-                            ● BEFORE: {beforeOp}
+                            ● BASELINE PLAN: {beforeOp}
                           </span>
-                          <span className="badge badge-danger" style={{ fontSize: '10px' }}>UNOPTIMIZED</span>
+                          <span className="badge badge-danger" style={{ fontSize: '10px' }}>BASELINE</span>
                         </div>
 
                         <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
                           <div><strong>Operator:</strong> <code style={{ color: '#f87171' }}>{beforeOp}</code></div>
                           <div><strong>Total Cost:</strong> {selectedSim.baseline_cost != null ? selectedSim.baseline_cost.toFixed(1) : 'N/A'}</div>
-                          <div><strong>Access Method:</strong> Disk block sequential sweep</div>
-                          <div><strong>Execution Penalty:</strong> Scans table rows without covering index</div>
+                          <div><strong>Access Method:</strong> {firstDiff.baseline_access || 'Baseline table scan path'}</div>
+                          {selectedSim.baseline_plan && Object.keys(selectedSim.baseline_plan).length > 0 && (
+                            <pre style={{ marginTop: '8px', padding: '8px', background: '#090d16', borderRadius: '4px', fontSize: '11px', maxHeight: '140px', overflowY: 'auto' }}>
+                              {JSON.stringify(selectedSim.baseline_plan, null, 2)}
+                            </pre>
+                          )}
                         </div>
                       </div>
 
@@ -656,16 +688,21 @@ export function SimulationsPage() {
                       <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <span style={{ fontSize: '12px', fontWeight: 700, color: '#34d399' }}>
-                            ● AFTER: {afterOp}
+                            ● CANDIDATE PLAN: {afterOp}
                           </span>
-                          <span className="badge badge-success" style={{ fontSize: '10px' }}>OPTIMIZED</span>
+                          <span className="badge badge-success" style={{ fontSize: '10px' }}>CANDIDATE</span>
                         </div>
 
                         <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
                           <div><strong>Operator:</strong> <code style={{ color: '#34d399' }}>{afterOp}</code></div>
                           <div><strong>Total Cost:</strong> {selectedSim.proposed_cost != null ? selectedSim.proposed_cost.toFixed(1) : 'N/A'}</div>
                           <div><strong>Index Used:</strong> <code>{firstDiff.index_name || 'HypoPG Virtual B-Tree'}</code></div>
-                          <div><strong>Detail:</strong> {firstDiff.detail || 'Direct pointer lookups via TID bitmap'}</div>
+                          <div><strong>Detail:</strong> {firstDiff.detail || 'Evaluated via HypoPG virtual catalog'}</div>
+                          {selectedSim.proposed_plan && Object.keys(selectedSim.proposed_plan).length > 0 && (
+                            <pre style={{ marginTop: '8px', padding: '8px', background: '#090d16', borderRadius: '4px', fontSize: '11px', maxHeight: '140px', overflowY: 'auto' }}>
+                              {JSON.stringify(selectedSim.proposed_plan, null, 2)}
+                            </pre>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -673,23 +710,32 @@ export function SimulationsPage() {
                 })()}
               </div>
 
-              {/* Real-World Storage & Overhead Footprint */}
+              {/* Storage, Overhead & Simulation Limitations */}
               {(() => {
                 const storage: any = selectedSim.estimated_storage_impact || {}
                 const write: any = selectedSim.write_overhead_estimate || {}
-                const projectedMb = storage.projected_physical_index_mb ?? (storage.estimated_index_bytes ? (Number(storage.estimated_index_bytes) / (1024 * 1024)).toFixed(2) : '14.5')
-                const writeImpact = write.write_impact_pct ?? write.insert_overhead_pct ?? 0.02
-                const writeClass = write.classification || write.estimated_relative_overhead || 'low'
+                const projectedMb =
+                  storage.projected_physical_index_mb != null
+                    ? `${storage.projected_physical_index_mb} MB`
+                    : storage.estimated_index_bytes != null
+                    ? `${(Number(storage.estimated_index_bytes) / (1024 * 1024)).toFixed(2)} MB`
+                    : 'Not measured in planner catalog'
+                const virtualRam =
+                  storage.hypothetical_index_ram_kb != null
+                    ? `${(Number(storage.hypothetical_index_ram_kb) / 1024).toFixed(2)} MB`
+                    : 'Ephemeral catalog entry (< 64 KB)'
+                const writeImpact = write.write_impact_pct ?? write.insert_overhead_pct
+                const writeClass = write.classification || write.estimated_relative_overhead || 'Not estimated'
                 return (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
                     <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
                       <div style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
                         💾 Simulated Storage Impact
                       </div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
-                        <div>• <strong>Virtual Catalog RAM:</strong> ~{storage.hypothetical_index_ram_kb ? `${(Number(storage.hypothetical_index_ram_kb) / 1024).toFixed(2)} MB` : '1.24 MB'} (HypoPG ephemeral)</div>
+                        <div>• <strong>Virtual Catalog RAM:</strong> {virtualRam}</div>
                         <div>• <strong>Physical Disk Allocated:</strong> {storage.disk_space_allocated_bytes ?? 0} Bytes (Virtual sandbox)</div>
-                        <div>• <strong>Projected Physical Index:</strong> ~{projectedMb} MB if approved</div>
+                        <div>• <strong>Projected Physical Index:</strong> {projectedMb}</div>
                       </div>
                     </div>
 
@@ -698,59 +744,86 @@ export function SimulationsPage() {
                         ✍️ Write Overhead & Maintenance
                       </div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
-                        <div>• <strong>INSERT/UPDATE Impact:</strong> +{writeImpact}% write overhead</div>
-                        <div>• <strong>Write Classification:</strong> {String(writeClass)} maintenance penalty</div>
-                        <div>• <strong>Table Lock Risk:</strong> Zero locks (Concurrent build)</div>
+                        <div>• <strong>INSERT/UPDATE Impact:</strong> {writeImpact != null ? `+${writeImpact}% write overhead` : 'Unmeasured in EXPLAIN mode'}</div>
+                        <div>• <strong>Write Classification:</strong> {String(writeClass)}</div>
+                        <div>• <strong>Sample Count:</strong> {getSampleCount(selectedSim) ?? 1} evaluation pass(es)</div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#f59e0b', marginBottom: '6px' }}>
+                        ⚠️ Simulation Scope & Limitations
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                        {selectedSim.limitations ? (
+                          <div>{selectedSim.limitations}</div>
+                        ) : selectedSim.is_measured ? (
+                          <div>Measured in isolated sandbox; production buffer cache warmth and concurrent lock contention may differ.</div>
+                        ) : (
+                          <div>HypoPG virtual indexes evaluate planner cost estimates only and do not measure physical disk I/O or index build time.</div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )
               })()}
 
-              {/* Workload Zero-Regression Guarantee */}
-              <div
-                style={{
-                  background: 'rgba(16, 185, 129, 0.08)',
-                  border: '1px solid rgba(16, 185, 129, 0.3)',
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <span style={{ fontSize: '22px' }}>🛡️</span>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#34d399' }}>
-                    Zero-Regression Invariant Verified Across Entire Workload
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    PostgreSQL optimizer checked active workload telemetry queries. No query regressed in cost or plan shape.
+              {/* Workload Regression Verification Status */}
+              {selectedSim.status === 'completed' && getImprovementPct(selectedSim) >= 0 ? (
+                <div
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}
+                >
+                  <span style={{ fontSize: '22px' }}>🛡️</span>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#34d399' }}>
+                      No Planner Cost Regression Detected in Evaluated Scope
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                      Candidate plan reduced or maintained estimated planner cost ({getImprovementPct(selectedSim).toFixed(1)}% delta) across {getSampleCount(selectedSim) ?? 1} evaluation pass(es).
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div
+                  style={{
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}
+                >
+                  <span style={{ fontSize: '22px' }}>⚠️</span>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#fbbf24' }}>
+                      Simulation Requires Operator Review
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                      Status is {selectedSim.status.toUpperCase()} with {getImprovementPct(selectedSim).toFixed(1)}% cost delta. Verify plan differences before approving.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Complete Optimization Trace */}
               <div style={{ marginTop: '4px' }}>
                 {(() => {
-                  const matchedRec = pendingRecs.find((r) => r.id === selectedSim.recommendation_id)
+                  const matchedRec = pendingRecs.find((r) => r.id === selectedSim.recommendation_id) || null
                   return (
                     <OptimizationTrace
                       title={`End-to-End Optimization Trace for Simulation #${selectedSim.id}`}
                       simulation={selectedSim}
-                      recommendation={matchedRec || (selectedSim.recommendation_id ? {
-                        id: selectedSim.recommendation_id,
-                        type: 'index_where',
-                        target: 'orders',
-                        proposed_change: 'CREATE INDEX CONCURRENTLY ON orders (amount);',
-                        reason: 'Evaluated in isolated HypoPG virtual index sandbox',
-                        expected_benefit: `${getImprovementPct(selectedSim).toFixed(1)}% cost reduction`,
-                        risk: 'low',
-                        confidence: selectedSim.confidence ?? 0.85,
-                        status: 'pending',
-                        requires_approval: true,
-                        created_at: selectedSim.created_at,
-                      } : null)}
+                      recommendation={matchedRec}
                       initialExpanded={true}
                     />
                   )

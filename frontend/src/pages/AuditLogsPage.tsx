@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import {
+  exportAuditLedger,
   getAssistantAuditLogs,
   getRecommendationAuditEvents,
   getSecurityAuditEvents,
+  queryAuditLedger,
   RecommendationAuditEvent,
   SecurityAuditEvent,
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
+import { useAuth } from '../context/AuthContext'
 
 type AssistantAuditItem = {
   timestamp: string
@@ -20,18 +23,59 @@ type AssistantAuditItem = {
 }
 
 export function AuditLogsPage() {
+  const { user, canSimulate } = useAuth()
   const [tab, setTab] = useState<'recommendations' | 'security' | 'assistant'>('recommendations')
   const [recEvents, setRecEvents] = useState<RecommendationAuditEvent[]>([])
   const [securityEvents, setSecurityEvents] = useState<SecurityAuditEvent[]>([])
   const [assistantEvents, setAssistantEvents] = useState<AssistantAuditItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Server-side filters & pagination
   const [filterText, setFilterText] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [actorFilter, setActorFilter] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+
+  // Export state
+  const [exportingFormat, setExportingFormat] = useState<'json' | 'csv' | null>(null)
+  const [exportNotice, setExportNotice] = useState<string | null>(null)
 
   const loadLogs = async () => {
     setLoading(true)
     setError(null)
     try {
+      // Try server-side paginated query endpoint first
+      try {
+        const res = await queryAuditLedger({
+          ledger: tab,
+          category: categoryFilter || undefined,
+          action: actionFilter || undefined,
+          status: statusFilter || undefined,
+          actor: actorFilter.trim() || undefined,
+          search: filterText.trim() || undefined,
+          page,
+          page_size: pageSize,
+        })
+        if (res && Array.isArray(res.items)) {
+          setTotal(res.total ?? res.items.length)
+          if (tab === 'recommendations') {
+            setRecEvents(res.items as RecommendationAuditEvent[])
+          } else if (tab === 'security') {
+            setSecurityEvents(res.items as SecurityAuditEvent[])
+          } else {
+            setAssistantEvents(res.items as AssistantAuditItem[])
+          }
+          return
+        }
+      } catch {
+        // Fall back to individual endpoints if /audit/query is unmocked in legacy tests
+      }
+
       const [recs, sec, asst] = await Promise.all([
         getRecommendationAuditEvents(),
         getSecurityAuditEvents(100).catch(() => []),
@@ -40,6 +84,9 @@ export function AuditLogsPage() {
       setRecEvents(recs || [])
       setSecurityEvents(sec || [])
       setAssistantEvents(asst || [])
+      const activeList =
+        tab === 'recommendations' ? recs || [] : tab === 'security' ? sec || [] : asst || []
+      setTotal(activeList.length)
     } catch (err: any) {
       setError(err?.message || 'Failed to load audit logs')
     } finally {
@@ -49,9 +96,62 @@ export function AuditLogsPage() {
 
   useEffect(() => {
     loadLogs()
-  }, [])
+  }, [tab, page, pageSize, categoryFilter, statusFilter, actionFilter])
+
+  const handleApplySearch = () => {
+    setPage(1)
+    loadLogs()
+  }
+
+  const handleClearFilters = () => {
+    setFilterText('')
+    setCategoryFilter('')
+    setStatusFilter('')
+    setActorFilter('')
+    setActionFilter('')
+    setPage(1)
+  }
+
+  const handleExport = async (format: 'json' | 'csv') => {
+    setExportingFormat(format)
+    setExportNotice(null)
+    setError(null)
+    try {
+      const result = await exportAuditLedger({
+        ledger: tab,
+        format,
+        category: categoryFilter || undefined,
+        action: actionFilter || undefined,
+        status: statusFilter || undefined,
+        actor: actorFilter.trim() || undefined,
+        search: filterText.trim() || undefined,
+      })
+      if (typeof window !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+          const blob = new Blob([result.content], { type: result.contentType })
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = result.filename
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          URL.revokeObjectURL(url)
+        } catch {
+          // Ignore DOM download errors in headless test environments
+        }
+      }
+      setExportNotice(`Exported ${tab} audit ledger as ${result.filename} (${format.toUpperCase()}).`)
+    } catch (err: any) {
+      setError(`Export failed: ${err?.message || 'Unable to export audit ledger'}`)
+    } finally {
+      setExportingFormat(null)
+    }
+  }
 
   const filteredRecEvents = recEvents.filter((r) => {
+    if (actionFilter && !r.action.toLowerCase().includes(actionFilter.toLowerCase())) return false
+    if (statusFilter && r.new_status.toLowerCase() !== statusFilter.toLowerCase()) return false
     if (!filterText.trim()) return true
     const q = filterText.toLowerCase()
     return (
@@ -63,6 +163,10 @@ export function AuditLogsPage() {
   })
 
   const filteredSecurityEvents = securityEvents.filter((s) => {
+    if (categoryFilter && s.event_category.toUpperCase() !== categoryFilter.toUpperCase()) return false
+    if (statusFilter && s.status.toUpperCase() !== statusFilter.toUpperCase()) return false
+    if (actorFilter.trim() && !(s.actor_username || '').toLowerCase().includes(actorFilter.trim().toLowerCase())) return false
+    if (actionFilter && !s.action.toLowerCase().includes(actionFilter.toLowerCase())) return false
     if (!filterText.trim()) return true
     const q = filterText.toLowerCase()
     return (
@@ -75,6 +179,11 @@ export function AuditLogsPage() {
   })
 
   const filteredAssistantEvents = assistantEvents.filter((a) => {
+    if (statusFilter) {
+      const wantAuth = statusFilter.toUpperCase() === 'AUTHORIZED' || statusFilter.toUpperCase() === 'SUCCESS'
+      if (a.authorized !== wantAuth) return false
+    }
+    if (actionFilter && !(a.event_type || '').toLowerCase().includes(actionFilter.toLowerCase())) return false
     if (!filterText.trim()) return true
     const q = filterText.toLowerCase()
     return (
@@ -84,6 +193,8 @@ export function AuditLogsPage() {
       a.session_id.toLowerCase().includes(q)
     )
   })
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -107,15 +218,15 @@ export function AuditLogsPage() {
           <div className="guide-banner-pills">
             <span className="badge badge-success">✓ Zero Unlogged Actions</span>
             <span className="badge badge-observed">✓ Operator Sign-Off Stamped</span>
-            <span className="badge badge-ai-analysis">✓ Tool Invocations Audited</span>
+            <span className="badge badge-ai-analysis">✓ Access-Controlled Export</span>
           </div>
         </div>
       </div>
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>Security & Execution Audit Logs</h1>
             <span className="badge badge-observed">OBSERVED</span>
             <span className="badge badge-approval-required">AUDIT TRAIL</span>
@@ -124,45 +235,221 @@ export function AuditLogsPage() {
             Immutable chronological ledger of recommendation approvals, rejections, tool calls, and security events.
           </p>
         </div>
-        <button className="btn btn-primary" onClick={loadLogs}>
-          Refresh Ledger
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {canSimulate ? (
+            <>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleExport('csv')}
+                disabled={exportingFormat !== null}
+                aria-label="Export filtered audit logs as CSV"
+              >
+                {exportingFormat === 'csv' ? 'Exporting CSV...' : '⬇ Export CSV'}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleExport('json')}
+                disabled={exportingFormat !== null}
+                aria-label="Export filtered audit logs as JSON"
+              >
+                {exportingFormat === 'json' ? 'Exporting JSON...' : '⬇ Export JSON'}
+              </button>
+            </>
+          ) : (
+            <span className="badge badge-approval-required" style={{ fontSize: '0.72rem' }}>
+              🔒 Export requires ANALYST / DBA / ADMIN ({user?.role || 'VIEWER'})
+            </span>
+          )}
+          <button className="btn btn-primary" onClick={loadLogs} disabled={loading}>
+            {loading ? 'Refreshing...' : 'Refresh Ledger'}
+          </button>
+        </div>
       </div>
 
-      {/* Filter / Search Bar */}
-      <div className="card" style={{ padding: '14px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <input
-          type="text"
-          className="filter-input"
-          style={{ flex: 1 }}
-          placeholder="Filter audit entries by action, actor, tool name, recommendation ID, or reason..."
-          value={filterText}
-          onChange={(e) => setFilterText(e.target.value)}
-        />
-        {filterText && (
-          <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => setFilterText('')}>
-            Clear
+      {/* Export confirmation banner */}
+      {exportNotice && (
+        <div
+          role="status"
+          className="card"
+          style={{
+            borderColor: '#10b981',
+            background: 'rgba(16, 185, 129, 0.1)',
+            color: '#6ee7b7',
+            padding: '10px 14px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span>✓ {exportNotice}</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setExportNotice(null)}>
+            Dismiss
           </button>
-        )}
+        </div>
+      )}
+
+      {/* Server-Side Filter & Search Bar */}
+      <div className="card" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+          <div>
+            <label htmlFor="audit-search-input" style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+              Keyword Search
+            </label>
+            <input
+              id="audit-search-input"
+              type="text"
+              className="filter-input"
+              style={{ width: '100%' }}
+              placeholder="Filter by action, actor, tool, ID, or reason..."
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleApplySearch()
+              }}
+            />
+          </div>
+
+          {tab === 'security' && (
+            <div>
+              <label htmlFor="audit-category-select" style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                Category
+              </label>
+              <select
+                id="audit-category-select"
+                className="filter-select"
+                style={{ width: '100%' }}
+                value={categoryFilter}
+                onChange={(e) => {
+                  setCategoryFilter(e.target.value)
+                  setPage(1)
+                }}
+              >
+                <option value="">All Categories</option>
+                <option value="AUTH">AUTH</option>
+                <option value="RBAC">RBAC</option>
+                <option value="RECOMMENDATION">RECOMMENDATION</option>
+                <option value="EXECUTION">EXECUTION</option>
+                <option value="AUDIT">AUDIT</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="audit-status-select" style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+              Status / Outcome
+            </label>
+            <select
+              id="audit-status-select"
+              className="filter-select"
+              style={{ width: '100%' }}
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value)
+                setPage(1)
+              }}
+            >
+              <option value="">All Statuses</option>
+              {tab === 'recommendations' ? (
+                <>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="pending">Pending</option>
+                </>
+              ) : (
+                <>
+                  <option value="SUCCESS">SUCCESS</option>
+                  <option value="DENIED">DENIED</option>
+                  <option value="FAILED">FAILED</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="audit-actor-input" style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+              Actor / Operator
+            </label>
+            <input
+              id="audit-actor-input"
+              type="text"
+              className="filter-input"
+              style={{ width: '100%' }}
+              placeholder="e.g. admin, dba_operator"
+              value={actorFilter}
+              onChange={(e) => setActorFilter(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="audit-page-size" style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+              Page Size
+            </label>
+            <select
+              id="audit-page-size"
+              className="filter-select"
+              style={{ width: '100%' }}
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value))
+                setPage(1)
+              }}
+            >
+              <option value={10}>10 / page</option>
+              <option value={20}>20 / page</option>
+              <option value={50}>50 / page</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+            Showing ledger: <strong>{tab.toUpperCase()}</strong> • Total matching entries: <strong>{total}</strong>
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary btn-sm" onClick={handleApplySearch}>
+              Apply Filters
+            </button>
+            {(filterText || categoryFilter || statusFilter || actorFilter || actionFilter) && (
+              <button className="btn btn-secondary btn-sm" onClick={handleClearFilters}>
+                Clear Filters
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Tab Switcher */}
-      <div className="subnav-tabs">
+      <div className="subnav-tabs" role="tablist" aria-label="Audit ledger categories">
         <button
+          role="tab"
+          aria-selected={tab === 'recommendations'}
           className={`subnav-tab ${tab === 'recommendations' ? 'active' : ''}`}
-          onClick={() => setTab('recommendations')}
+          onClick={() => {
+            setTab('recommendations')
+            setPage(1)
+          }}
         >
           Recommendation Decisions ({recEvents.length})
         </button>
         <button
+          role="tab"
+          aria-selected={tab === 'security'}
           className={`subnav-tab ${tab === 'security' ? 'active' : ''}`}
-          onClick={() => setTab('security')}
+          onClick={() => {
+            setTab('security')
+            setPage(1)
+          }}
         >
           Unified Security Ledger ({securityEvents.length})
         </button>
         <button
+          role="tab"
+          aria-selected={tab === 'assistant'}
           className={`subnav-tab ${tab === 'assistant' ? 'active' : ''}`}
-          onClick={() => setTab('assistant')}
+          onClick={() => {
+            setTab('assistant')
+            setPage(1)
+          }}
         >
           Assistant Tool Invocations ({assistantEvents.length})
         </button>
@@ -177,8 +464,23 @@ export function AuditLogsPage() {
 
       {/* Error state */}
       {error && (
-        <div className="card" style={{ borderColor: '#ef4444', color: '#fca5a5' }}>
-          Failed to load audit trail: {error}
+        <div
+          role="alert"
+          className="card"
+          style={{
+            borderColor: '#ef4444',
+            color: '#fca5a5',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>Failed to load audit trail: {error}</span>
+          <button className="btn btn-secondary btn-sm" onClick={loadLogs}>
+            Retry
+          </button>
         </div>
       )}
 
@@ -354,6 +656,29 @@ export function AuditLogsPage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Server-Side Pagination Controls */}
+      {!loading && !error && total > 0 && (
+        <div className="pagination">
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
+            Page <strong>{page}</strong> of <strong>{totalPages}</strong> ({total} total entries)
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
         </div>
       )}
     </div>

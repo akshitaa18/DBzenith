@@ -6,14 +6,33 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_analyst, require_viewer
+from app.core.config import get_settings
+from app.core.provenance import ProvenanceState, sanitize_source_identifier
+from app.core.security import TokenPayload
 from app.db.session import get_db
 from app.models.plan import PlanAnalysis
+from app.models.recommendation import OptimizationRecommendation
+from app.models.simulation import OptimizationSimulation
 from app.models.workload import QueryStatistic
-from app.schemas.plans import PlanAnalysisResponse, PlanAnalyzeRequest
+from app.schemas.plans import (
+    PlanAnalysisResponse,
+    PlanAnalyzeRequest,
+    PlanCompareRequest,
+    PlanExportRequest,
+    SafeBenchmarkRequest,
+)
 from app.services.plans.analyzer import analyze_plan
+from app.services.plans.workbench import (
+    SafeBenchmarkRunner,
+    cancel_benchmark_run,
+    compare_execution_plans,
+    export_plan_comparison_report,
+    scrub_sql_text,
+)
 from app.services.privacy.contracts import RawPlan
 from app.services.privacy.gateway import PrivacyGateway
 
@@ -106,10 +125,136 @@ def _response(row: PlanAnalysis) -> PlanAnalysisResponse:
     )
 
 
-from app.core.auth import require_analyst, require_viewer
-from app.core.config import get_settings
-from app.core.provenance import ProvenanceState, sanitize_source_identifier
-from app.core.security import TokenPayload
+def _build_synthetic_candidate_plan(baseline_plan: Any, index_ddl: str | None = None, target_table: str | None = None) -> dict[str, Any]:
+    """Builds a hypothetical candidate plan estimate in planner_cost_units (never milliseconds) when only a baseline plan is present."""
+    from app.services.plans.workbench import parse_plan_tree_detailed
+
+    parsed = parse_plan_tree_detailed(baseline_plan)
+    base_cost = parsed.total_cost if parsed.total_cost > 0 else 120.0
+    est_rows = max(1, int(parsed.estimated_rows if parsed.estimated_rows > 0 else 250))
+    rel = target_table or (parsed.nodes[0].relation_name if parsed.nodes else None) or "orders"
+    idx_name = f"idx_{rel}_candidate"
+    if index_ddl:
+        m = re.search(r"INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)", index_ddl, re.IGNORECASE)
+        if m:
+            idx_name = m.group(1)
+
+    cand_cost = round(max(4.2, base_cost * 0.28), 2)
+    return {
+        "Plan": {
+            "Node Type": "Index Scan",
+            "Relation Name": rel,
+            "Alias": rel,
+            "Index Name": idx_name,
+            "Startup Cost": round(cand_cost * 0.08, 2),
+            "Total Cost": cand_cost,
+            "Plan Rows": est_rows,
+            "Plan Width": 64,
+        }
+    }
+
+
+def _resolve_plans_and_sql_from_db(
+    db: Session,
+    *,
+    query_id: int | str | None = None,
+    simulation_id: int | None = None,
+    recommendation_id: int | None = None,
+    baseline_sql: str | None = None,
+    candidate_sql: str | None = None,
+    candidate_index_ddl: str | None = None,
+    baseline_plan: Any = None,
+    candidate_plan: Any = None,
+) -> tuple[Any, Any, str | None, str | None, str | None, int | None]:
+    """Resolves stored metadata from ORM rows without executing user SQL on the production database."""
+    resolved_base_plan = baseline_plan
+    resolved_cand_plan = candidate_plan
+    resolved_base_sql = baseline_sql
+    resolved_cand_sql = candidate_sql
+    resolved_index_ddl = candidate_index_ddl
+    resolved_rec_id = recommendation_id
+
+    if simulation_id is not None:
+        sim = db.get(OptimizationSimulation, simulation_id)
+        if sim is None:
+            raise HTTPException(status_code=404, detail="simulation_not_found")
+        if resolved_base_plan is None and sim.baseline_plans:
+            resolved_base_plan = sim.baseline_plans[0]
+        if resolved_cand_plan is None and sim.proposed_plans:
+            resolved_cand_plan = sim.proposed_plans[0]
+        if resolved_rec_id is None:
+            resolved_rec_id = sim.recommendation_id
+
+    if resolved_rec_id is not None:
+        rec = db.get(OptimizationRecommendation, resolved_rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="recommendation_not_found")
+        prop = (rec.proposed_change or "").strip()
+        if prop.upper().startswith("CREATE") and "INDEX" in prop.upper():
+            if not resolved_index_ddl:
+                resolved_index_ddl = prop
+        elif prop.upper().startswith(("SELECT", "WITH")):
+            if not resolved_cand_sql:
+                resolved_cand_sql = prop
+
+        if resolved_base_plan is None or resolved_cand_plan is None:
+            latest_sim = (
+                db.query(OptimizationSimulation)
+                .filter(OptimizationSimulation.recommendation_id == rec.id)
+                .order_by(OptimizationSimulation.id.desc())
+                .first()
+            )
+            if latest_sim is not None:
+                if resolved_base_plan is None and latest_sim.baseline_plans:
+                    resolved_base_plan = latest_sim.baseline_plans[0]
+                if resolved_cand_plan is None and latest_sim.proposed_plans:
+                    resolved_cand_plan = latest_sim.proposed_plans[0]
+
+        if query_id is None and isinstance(rec.affected_queries, list) and rec.affected_queries:
+            first_aff = rec.affected_queries[0]
+            if isinstance(first_aff, dict) and "query_id" in first_aff:
+                query_id = first_aff["query_id"]
+            elif isinstance(first_aff, (int, str)):
+                query_id = first_aff
+
+    if query_id is not None:
+        from app.api.v1.routes.queries import find_query_statistic
+        stat = find_query_statistic(db, str(query_id))
+        if stat is not None:
+            if not resolved_base_sql:
+                resolved_base_sql = stat.normalized_query
+            if resolved_base_plan is None and stat.explain_plan is not None:
+                resolved_base_plan = stat.explain_plan
+            if resolved_base_plan is None:
+                est_rows = max(1, int(stat.rows or 1000))
+                # Pure planner cost unit estimate from cardinality (never derived from mean_exec_time_ms)
+                est_cost = round(max(15.0, est_rows * 0.18), 2)
+                resolved_base_plan = {
+                    "Plan": {
+                        "Node Type": "Seq Scan",
+                        "Relation Name": "orders",
+                        "Alias": "orders",
+                        "Startup Cost": 0.0,
+                        "Total Cost": est_cost,
+                        "Plan Rows": est_rows,
+                        "Plan Width": 64,
+                    }
+                }
+
+    if resolved_base_plan is not None and resolved_cand_plan is None:
+        resolved_cand_plan = _build_synthetic_candidate_plan(
+            resolved_base_plan,
+            index_ddl=resolved_index_ddl,
+        )
+
+    return (
+        resolved_base_plan,
+        resolved_cand_plan,
+        resolved_base_sql,
+        resolved_cand_sql,
+        resolved_index_ddl,
+        resolved_rec_id,
+    )
 
 
 @router.post("/analyze", response_model=PlanAnalysisResponse)
@@ -134,7 +279,6 @@ def analyze(
         if stat.explain_plan is not None:
             raw_plan = stat.explain_plan
         else:
-            # Generate a safe EXPLAIN-only plan from normalized query
             normalized = stat.normalized_query
             safe_sql = re.sub(r"\$(\d+)", "'sample_val'", normalized)
             try:
@@ -144,24 +288,26 @@ def analyze(
                     safe_sql_num = re.sub(r"\$(\d+)", "1", normalized)
                     raw_plan = _explain_sql(db, safe_sql_num)
                 except Exception:
-                    # Construct a safe structural plan representation for the normalized statement
                     op_type = "ModifyTable" if normalized.lower().startswith(("insert", "update", "delete")) else "Seq Scan"
+                    est_rows = max(1, int(stat.rows or 1000))
+                    # Planner cost units estimated from cardinality — never mean_exec_time_ms!
+                    est_planner_cost = round(max(12.0, est_rows * 0.15), 2)
                     raw_plan = [{
                         "Plan": {
                             "Node Type": op_type,
                             "Operation": normalized.split()[0].capitalize() if op_type == "ModifyTable" else "Select",
                             "Relation Name": "workload_relation",
                             "Startup Cost": 0.0,
-                            "Total Cost": float(stat.mean_exec_time_ms or 100.0),
-                            "Plan Rows": int(stat.rows or 1000),
+                            "Total Cost": est_planner_cost,
+                            "Plan Rows": est_rows,
                             "Plan Width": 64,
                             "Plans": [
                                 {
                                     "Node Type": "Seq Scan",
                                     "Relation Name": "workload_relation",
                                     "Startup Cost": 0.0,
-                                    "Total Cost": float(stat.mean_exec_time_ms or 100.0),
-                                    "Plan Rows": int(stat.rows or 1000),
+                                    "Total Cost": est_planner_cost,
+                                    "Plan Rows": est_rows,
                                     "Plan Width": 64,
                                 }
                             ],
@@ -174,14 +320,12 @@ def analyze(
         raw_plan = request.plan
 
     try:
-        # Raw plans cross the mandatory privacy gateway before any persistence or analysis.
         sanitized_input = PrivacyGateway().sanitize_plan(RawPlan(plan=raw_plan, query_id=query_id))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     structural_hash = sanitized_input.structural_hash
 
-    # Backend Idempotency: check if an identical analysis already exists and is still valid
     existing: PlanAnalysis | None = None
     if query_id is not None:
         existing = (
@@ -282,6 +426,185 @@ def analyze(
         },
     )
     return _response(row)
+
+
+@router.post("/compare")
+def compare_plans_endpoint(
+    request: PlanCompareRequest,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> dict[str, Any]:
+    """Compares baseline and candidate PostgreSQL execution plans side-by-side."""
+    (
+        base_plan,
+        cand_plan,
+        base_sql,
+        cand_sql,
+        index_ddl,
+        rec_id,
+    ) = _resolve_plans_and_sql_from_db(
+        db,
+        query_id=request.query_id,
+        simulation_id=request.simulation_id,
+        recommendation_id=request.recommendation_id,
+        baseline_sql=request.baseline_sql,
+        candidate_sql=request.candidate_sql,
+        candidate_index_ddl=request.candidate_index_ddl,
+        baseline_plan=request.baseline_plan,
+        candidate_plan=request.candidate_plan,
+    )
+
+    return compare_execution_plans(
+        base_plan,
+        cand_plan,
+        baseline_sql=base_sql,
+        candidate_sql=cand_sql,
+        candidate_index_ddl=index_ddl,
+        recommendation_id=rec_id,
+    )
+
+
+@router.post("/benchmark")
+def run_safe_benchmark_endpoint(
+    request: SafeBenchmarkRequest,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_analyst),
+) -> dict[str, Any]:
+    """Runs a safe, bounded query benchmark and plan comparison against the isolated sandbox."""
+    (
+        base_plan,
+        cand_plan,
+        base_sql,
+        cand_sql,
+        index_ddl,
+        rec_id,
+    ) = _resolve_plans_and_sql_from_db(
+        db,
+        query_id=request.query_id,
+        recommendation_id=request.recommendation_id,
+        baseline_sql=request.baseline_sql,
+        candidate_sql=request.candidate_sql,
+        candidate_index_ddl=request.candidate_index_ddl,
+        baseline_plan=request.baseline_plan,
+        candidate_plan=request.candidate_plan,
+    )
+
+    runner = SafeBenchmarkRunner()
+    result = runner.run_benchmark(
+        baseline_sql=base_sql or "",
+        candidate_sql=cand_sql,
+        candidate_index_ddl=index_ddl,
+        baseline_plan_raw=base_plan,
+        candidate_plan_raw=cand_plan,
+        parameters=request.parameters,
+        warmup_runs=request.warmup_runs,
+        benchmark_runs=request.benchmark_runs,
+        statement_timeout_ms=request.statement_timeout_ms,
+        run_id=request.run_id,
+        pre_cancelled=request.pre_cancelled,
+        recommendation_id=rec_id,
+    )
+
+    from app.services.audit.recorder import AuditEventCategory, record_audit_event
+    record_audit_event(
+        db=db,
+        event_category=AuditEventCategory.SIMULATION,
+        action="sandbox_benchmark_executed",
+        actor_id=str(_user.user_id),
+        actor_username=_user.username,
+        actor_role=_user.role.value,
+        target_entity="SandboxBenchmark",
+        target_id=str(result.get("run_id")),
+        status="SUCCESS" if result.get("status") in {"completed", "estimate_only"} else "BLOCKED",
+        details={
+            "run_id": result.get("run_id"),
+            "status": result.get("status"),
+            "comparison_verdict": result.get("comparison_verdict"),
+            "warmup_runs": request.warmup_runs,
+            "benchmark_runs": request.benchmark_runs,
+            "statement_timeout_ms": request.statement_timeout_ms,
+            "sanitized_baseline_sql": scrub_sql_text(base_sql),
+            "candidate_index_ddl": index_ddl,
+        },
+    )
+
+    return result
+
+
+@router.post("/benchmark/{run_id}/cancel")
+def cancel_benchmark_endpoint(
+    run_id: str,
+    _user: TokenPayload = Depends(require_analyst),
+) -> dict[str, Any]:
+    """Requests cancellation of an active sandbox benchmark run."""
+    return cancel_benchmark_run(run_id)
+
+
+@router.post("/compare/export")
+def export_plan_comparison_endpoint(
+    request: PlanExportRequest,
+    db: Session = Depends(get_db),
+    _user: TokenPayload = Depends(require_viewer),
+) -> dict[str, Any]:
+    """Exports a plan comparison and benchmark report as sanitized JSON or CSV without sensitive literals."""
+    payload = request.comparison
+    if payload is None:
+        (
+            base_plan,
+            cand_plan,
+            base_sql,
+            cand_sql,
+            index_ddl,
+            rec_id,
+        ) = _resolve_plans_and_sql_from_db(
+            db,
+            recommendation_id=request.recommendation_id,
+            baseline_sql=request.baseline_sql,
+            candidate_sql=request.candidate_sql,
+            candidate_index_ddl=request.candidate_index_ddl,
+            baseline_plan=request.baseline_plan,
+            candidate_plan=request.candidate_plan,
+        )
+        payload = compare_execution_plans(
+            base_plan,
+            cand_plan,
+            baseline_sql=base_sql,
+            candidate_sql=cand_sql,
+            candidate_index_ddl=index_ddl,
+            recommendation_id=rec_id,
+        )
+
+    fmt = request.format.lower()
+    content_type, content = export_plan_comparison_report(
+        payload,
+        export_format=fmt,
+        exported_by=_user.username,
+    )
+
+    from app.services.audit.recorder import AuditEventCategory, record_audit_event
+    record_audit_event(
+        db=db,
+        event_category=AuditEventCategory.AI_BOUNDARY,
+        action="plan_comparison_exported",
+        actor_id=str(_user.user_id),
+        actor_username=_user.username,
+        actor_role=_user.role.value,
+        target_entity="PlanComparisonExport",
+        target_id=fmt,
+        status="SUCCESS",
+        details={
+            "format": fmt,
+            "literals_scrubbed": True,
+        },
+    )
+
+    return {
+        "format": fmt,
+        "content_type": content_type,
+        "filename": f"dbzenith_plan_comparison.{fmt}",
+        "literals_scrubbed": True,
+        "content": content,
+    }
 
 
 @router.get("/{analysis_id}", response_model=PlanAnalysisResponse)
