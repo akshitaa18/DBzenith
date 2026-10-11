@@ -12,7 +12,7 @@ class QueryRewriteAdvisor:
     def __init__(self, rewrite_engine: Optional[SQLRewriteEngine] = None):
         self.rewrite_engine = rewrite_engine or get_rewrite_engine()
 
-    def advise(self, queries: list[QueryStatistic]) -> list[Recommendation]:
+    def advise(self, queries: list[QueryStatistic], validate_sandbox: bool = True) -> list[Recommendation]:
         out = []
         for q in queries:
             sql = q.normalized_query
@@ -20,7 +20,11 @@ class QueryRewriteAdvisor:
 
             # 1. Attempt AST-driven safe SQL rewriting
             try:
-                rewrite_res = self.rewrite_engine.rewrite(sql, query_id=str(q.query_id))
+                rewrite_res = self.rewrite_engine.rewrite(
+                    sql,
+                    validate_sandbox=validate_sandbox,
+                    query_id=str(q.query_id),
+                )
                 if rewrite_res.transformed and rewrite_res.is_safe:
                     trans_val = rewrite_res.transformation if isinstance(rewrite_res.transformation, str) else rewrite_res.transformation.value
                     status_val = rewrite_res.validation_status if isinstance(rewrite_res.validation_status, str) else rewrite_res.validation_status.value

@@ -98,10 +98,17 @@ def _response(row: PlanAnalysis) -> PlanAnalysisResponse:
         features=row.features,
         bottlenecks=row.bottlenecks,
         explanation={**row.explanation, "gnn": row.explanation.get("gnn")} if isinstance(row.explanation, dict) else row.explanation,
+        provenance_state=row.provenance_state or "HYPOTHETICAL_PLAN_ESTIMATE",
+        source_identifier=row.source_identifier,
+        is_synthetic=bool(row.is_synthetic),
+        is_measured=bool(row.is_measured),
+        model_version=row.model_version or "deterministic-plan-analyzer-v0.7.0",
     )
 
 
 from app.core.auth import require_analyst, require_viewer
+from app.core.config import get_settings
+from app.core.provenance import ProvenanceState, sanitize_source_identifier
 from app.core.security import TokenPayload
 
 
@@ -113,6 +120,7 @@ def analyze(
 ) -> PlanAnalysisResponse:
     query_id: int | None = None
     raw_plan: Any = None
+    is_synthetic = False
 
     if request.query_id is not None:
         from app.api.v1.routes.queries import find_query_statistic
@@ -121,6 +129,7 @@ def analyze(
             raise HTTPException(status_code=404, detail="query_stat_not_found")
 
         query_id = stat.query_id
+        is_synthetic = bool(stat.is_synthetic) or stat.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value
 
         if stat.explain_plan is not None:
             raw_plan = stat.explain_plan
@@ -218,6 +227,23 @@ def analyze(
         extra={"event": "PLAN_ANALYSIS_EXECUTED", "query_id": query_id, "structural_hash": structural_hash},
     )
 
+    gnn_out = result.get("gnn")
+    model_ver = (
+        f"gnn-{gnn_out.get('model_type', 'gcn')}-v0.7.0"
+        if isinstance(gnn_out, dict)
+        else "deterministic-plan-analyzer-v0.7.0"
+    )
+    prov_state = (
+        ProvenanceState.SYNTHETIC_DEMO.value
+        if is_synthetic
+        else ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+    )
+    source_id = (
+        "synthetic://demo-workload-generator"
+        if is_synthetic
+        else sanitize_source_identifier(get_settings().database_url)
+    )
+
     sanitized = result["sanitized_plan"]
     row = PlanAnalysis(
         query_id=query_id,
@@ -226,11 +252,35 @@ def analyze(
         graph=result["graph"],
         features=result["features"],
         bottlenecks=result["bottlenecks"],
-        explanation={**result["explanation"], "gnn": result.get("gnn")},
+        explanation={**result["explanation"], "gnn": gnn_out},
+        provenance_state=prov_state,
+        source_identifier=source_id,
+        is_synthetic=is_synthetic,
+        is_measured=False,
+        model_version=model_ver,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    from app.services.audit.recorder import AuditEventCategory, record_audit_event
+    record_audit_event(
+        db=db,
+        event_category=AuditEventCategory.AI_BOUNDARY,
+        action="plan_analyzed",
+        actor_id=str(_user.user_id),
+        actor_username=_user.username,
+        actor_role=_user.role.value,
+        target_entity="PlanAnalysis",
+        target_id=str(row.id),
+        status="SUCCESS",
+        details={
+            "query_id": query_id,
+            "structural_hash": structural_hash,
+            "provenance_state": prov_state,
+            "model_version": model_ver,
+        },
+    )
     return _response(row)
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,3 +27,10 @@ class OptimizationSimulation(Base):
     baseline_plans: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     proposed_plans: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     error: Mapped[str | None] = mapped_column(Text)
+    provenance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="HYPOTHETICAL_PLAN_ESTIMATE", index=True)
+    source_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    simulation_method: Mapped[str] = mapped_column(String(64), nullable=False, default="hypopg_plan_estimate")
+    result_type: Mapped[str] = mapped_column(String(64), nullable=False, default="HYPOTHETICAL_PLAN_ESTIMATE")
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    is_measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True, default="hypopg-sandbox-v0.7.0")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.rewriter.contracts import SQLRewriteResult
 from app.services.rewriter.engine import get_rewrite_engine
@@ -12,6 +12,8 @@ router = APIRouter(prefix="/rewriter", tags=["rewriter"])
 
 
 class SQLRewriteApiRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sql: str = Field(..., description="Target candidate SQL query to rewrite.")
     validate_sandbox: bool = Field(
         default=True,

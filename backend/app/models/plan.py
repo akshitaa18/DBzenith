@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,3 +19,8 @@ class PlanAnalysis(Base):
     features: Mapped[dict] = mapped_column(JSONB, nullable=False)
     bottlenecks: Mapped[list] = mapped_column(JSONB, nullable=False)
     explanation: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    provenance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="HYPOTHETICAL_PLAN_ESTIMATE", index=True)
+    source_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { OptimizationFlowHeader, OptimizationStage } from './OptimizationFlowHeader'
+import { EstimateVsMeasuredNotice, ProvenanceBadge } from './ProvenanceBadge'
 import type { QueryDetail, Recommendation, Simulation, PlanAnalysis, SQLRewriteResponse } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -14,6 +15,10 @@ export interface OptimizationTraceProps {
     shared_blks_hit?: number
     shared_blks_read?: number
     rows?: number
+    provenance_state?: string
+    provenance_badge?: string
+    is_synthetic?: boolean
+    is_measured?: boolean
   } | null
   recommendation?: Recommendation | Partial<Recommendation> | null
   simulation?: Simulation | Partial<Simulation> | null
@@ -103,8 +108,19 @@ export function OptimizationTrace({
     rewrite?.cost_improvement_pct ??
     (baselineCost && proposedCost && baselineCost > 0 ? ((baselineCost - proposedCost) / baselineCost) * 100 : null)
 
+  const isSimSynthetic = Boolean(
+    simulation?.is_synthetic ||
+    recommendation?.is_synthetic ||
+    (query as any)?.is_synthetic
+  )
+  const isSimMeasured = Boolean(
+    !isSimSynthetic &&
+    (simulation?.is_measured || (simulation?.benchmark as any)?.is_measured)
+  )
+
   const latencyBefore = query?.mean_exec_time_ms ? formatMs(query.mean_exec_time_ms) : 'Not measured'
   const simLatencyNum =
+    (simulation?.benchmark as any)?.measured_latency_ms ??
     (simulation?.benchmark as any)?.simulated_latency_ms ??
     (simulation?.benchmark as any)?.p50_simulated_ms ??
     (simulation?.benchmark as any)?.queries?.[0]?.proposed_mean_execution_ms ??
@@ -157,6 +173,11 @@ export function OptimizationTrace({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ProvenanceBadge
+            badge={simulation?.provenance_badge || recommendation?.provenance_badge || (query as any)?.provenance_badge}
+            state={simulation?.provenance_state || recommendation?.provenance_state || (query as any)?.provenance_state}
+            isSynthetic={isSimSynthetic}
+          />
           {recommendation?.status && (
             <span
               className={`badge ${
@@ -190,6 +211,13 @@ export function OptimizationTrace({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span className="badge badge-observed">STAGE 1: ORIGINAL QUERY</span>
+                {query && (
+                  <ProvenanceBadge
+                    badge={(query as any).provenance_badge}
+                    state={(query as any).provenance_state}
+                    isSynthetic={(query as any).is_synthetic}
+                  />
+                )}
                 {query?.query_id && <span style={{ fontSize: '11px', color: '#64748b' }}>Query ID: {query.query_id}</span>}
               </div>
               <div style={{ fontSize: '11px', color: '#94a3b8' }}>
@@ -244,8 +272,13 @@ export function OptimizationTrace({
             </div>
 
             <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', flexWrap: 'wrap' }}>
                 <span className="badge badge-recommendation">STAGE 5: RECOMMENDED OPTIMIZATION</span>
+                <ProvenanceBadge
+                  badge={recommendation?.provenance_badge || 'ESTIMATED'}
+                  state={recommendation?.provenance_state || 'HYPOTHETICAL_PLAN_ESTIMATE'}
+                  isSynthetic={recommendation?.is_synthetic}
+                />
                 <span style={{ fontSize: '11px', color: '#10b981' }}>Type: {optimizationType}</span>
               </div>
               <pre className="sql-box" style={{ margin: '6px 0', maxHeight: '70px', fontSize: '11px' }}>
@@ -253,6 +286,9 @@ export function OptimizationTrace({
               </pre>
               <div style={{ fontSize: '11px', color: '#94a3b8' }}>
                 Risk Score: <strong>{riskScore}</strong>
+                {recommendation?.model_version && (
+                  <span> • Model: <code>{recommendation.model_version}</code></span>
+                )}
               </div>
             </div>
           </div>
@@ -260,10 +296,15 @@ export function OptimizationTrace({
           {/* Step 6: Before vs After Comparison */}
           <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px 14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span className="badge badge-simulation">STAGE 6: BEFORE VS AFTER COMPARISON</span>
+                <ProvenanceBadge
+                  badge={simulation?.provenance_badge || (isSimMeasured ? 'SIMULATED' : 'ESTIMATED')}
+                  state={simulation?.provenance_state}
+                  isSynthetic={isSimSynthetic}
+                />
                 <span className="badge" style={{ background: '#065f46', color: '#34d399', fontSize: '10px' }}>
-                  SIMULATED — NOT APPLIED TO PRODUCTION
+                  {isSimMeasured ? 'SANDBOX BENCHMARK — NOT APPLIED TO PRODUCTION' : 'PLANNER COST ESTIMATE — NOT A MEASURED BENCHMARK'}
                 </span>
               </div>
               {improvementPct !== null && (
@@ -287,7 +328,7 @@ export function OptimizationTrace({
                 <strong style={{ fontSize: '16px', color: '#86efac' }}>
                   {proposedCost !== null ? proposedCost.toFixed(2) : 'Awaiting validation'}
                 </strong>
-                <small style={{ display: 'block', fontSize: '10px', color: '#64748b' }}>HypoPG Simulation</small>
+                <small style={{ display: 'block', fontSize: '10px', color: '#64748b' }}>HypoPG Cost Estimate</small>
               </div>
 
               <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
@@ -297,11 +338,24 @@ export function OptimizationTrace({
               </div>
 
               <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
-                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Simulated Latency</span>
+                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>
+                  {isSimMeasured ? 'Measured Benchmark Latency' : 'Estimated Latency (Unmeasured)'}
+                </span>
                 <strong style={{ fontSize: '16px', color: '#38bdf8' }}>{latencyAfter}</strong>
-                <small style={{ display: 'block', fontSize: '10px', color: '#64748b' }}>Projected runtime</small>
+                <small style={{ display: 'block', fontSize: '10px', color: '#64748b' }}>
+                  {isSimMeasured ? 'Sandbox execution timing' : 'Projected from planner cost'}
+                </small>
               </div>
             </div>
+
+            <EstimateVsMeasuredNotice
+              isMeasured={isSimMeasured}
+              isSynthetic={isSimSynthetic}
+              isVerifiedSpeedup={simulation?.is_verified_speedup}
+              explanation={simulation?.estimate_vs_measured_explanation || recommendation?.estimate_vs_measured_explanation}
+              simulationMethod={simulation?.simulation_method}
+              modelVersion={simulation?.model_version || recommendation?.model_version}
+            />
 
             {simulation?.plan_differences && simulation.plan_differences.length > 0 && (
               <div style={{ marginTop: '10px' }}>

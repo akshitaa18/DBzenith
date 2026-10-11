@@ -28,6 +28,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
+from app.core.provenance import (
+    ProvenanceState,
+    compute_query_fingerprint,
+    ensure_provenance_schema,
+)
 from app.db.base import Base
 from app.models.workload import WorkloadSnapshot, QueryStatistic
 from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
@@ -478,151 +483,170 @@ COMPREHENSIVE_QUERIES = [
 ]
 
 
-def generate_comprehensive_workload(db_url: str | None = None) -> dict:
-    """Main execution function for comprehensive workload seeding."""
+def generate_comprehensive_workload(db_url: str | None = None, existing_session=None) -> dict:
+    """Main execution function for comprehensive synthetic demo workload seeding.
+
+    Safely refreshes only SYNTHETIC_DEMO records and never deletes legitimate live/historical
+    observations, recommendations, simulations, or audit events.
+    """
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except Exception:
         pass
 
     settings = get_settings()
-    url = db_url or settings.database_url
-    print(f"Connecting to database: {url.split('@')[-1] if '@' in url else url}", flush=True)
+    owns_session = existing_session is None
+    engine = None
+    if owns_session:
+        url = db_url or settings.database_url
+        print(f"Connecting to database: {url.split('@')[-1] if '@' in url else url}", flush=True)
+        engine = create_engine(url, pool_pre_ping=True)
+        Base.metadata.create_all(bind=engine)
+        ensure_provenance_schema(engine)
+        SessionFactory = sessionmaker(bind=engine)
+        session = SessionFactory()
+    else:
+        session = existing_session
+        if session.bind is not None:
+            try:
+                ensure_provenance_schema(session.bind)
+            except Exception:
+                pass
 
-    engine = create_engine(url, pool_pre_ping=True)
-    Base.metadata.create_all(bind=engine)
-    SessionFactory = sessionmaker(bind=engine)
-    session = SessionFactory()
+    is_postgres = bool(session.bind is not None and session.bind.dialect.name == "postgresql")
+    demo_source = "synthetic://demo-workload-generator"
 
     try:
-        # 1. Clean Stale / Redundant Records
-        print("\n[Step 1/7] Cleaning redundant/stale internal telemetry & metadata...", flush=True)
-        session.execute(text("DELETE FROM optimization_simulations;"))
-        session.execute(text("DELETE FROM recommendation_audit_events;"))
-        session.execute(text("DELETE FROM optimization_recommendations;"))
-        session.execute(text("DELETE FROM plan_analyses;"))
-        session.execute(text("DELETE FROM query_statistics;"))
-        session.execute(text("DELETE FROM workload_snapshots;"))
+        # 1. Clean ONLY previous synthetic demo records; preserve all legitimate records
+        print("\n[Step 1/7] Cleaning previous synthetic demo records (preserving legitimate data)...", flush=True)
+        session.query(OptimizationSimulation).filter(
+            (OptimizationSimulation.is_synthetic.is_(True))
+            | (OptimizationSimulation.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value)
+        ).delete(synchronize_session=False)
+        session.query(RecommendationAuditEvent).filter(
+            RecommendationAuditEvent.metadata_json.like('%"is_synthetic": true%')
+        ).delete(synchronize_session=False)
+
+        non_synthetic_audited_rec_ids = [
+            r[0]
+            for r in session.query(RecommendationAuditEvent.recommendation_id).distinct().all()
+            if r[0] is not None
+        ]
+        rec_del_q = session.query(OptimizationRecommendation).filter(
+            (OptimizationRecommendation.is_synthetic.is_(True))
+            | (OptimizationRecommendation.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value)
+        )
+        if non_synthetic_audited_rec_ids:
+            rec_del_q = rec_del_q.filter(~OptimizationRecommendation.id.in_(non_synthetic_audited_rec_ids))
+        rec_del_q.delete(synchronize_session=False)
+
+        session.query(PlanAnalysis).filter(
+            (PlanAnalysis.is_synthetic.is_(True))
+            | (PlanAnalysis.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value)
+        ).delete(synchronize_session=False)
+        session.query(QueryStatistic).filter(
+            (QueryStatistic.is_synthetic.is_(True))
+            | (QueryStatistic.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value)
+        ).delete(synchronize_session=False)
+
+        remaining_snap_ids = [
+            r[0]
+            for r in session.query(QueryStatistic.snapshot_id).distinct().all()
+            if r[0] is not None
+        ]
+        snap_del_q = session.query(WorkloadSnapshot).filter(
+            (WorkloadSnapshot.is_synthetic.is_(True))
+            | (WorkloadSnapshot.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value)
+        )
+        if remaining_snap_ids:
+            snap_del_q = snap_del_q.filter(~WorkloadSnapshot.id.in_(remaining_snap_ids))
+        snap_del_q.delete(synchronize_session=False)
+
+        session.query(SecurityAuditEvent).filter(
+            SecurityAuditEvent.details_json.like('%"is_synthetic": true%')
+        ).delete(synchronize_session=False)
         session.commit()
-        print("  [OK] Stale queries and recommendations cleared.")
+        print("  [OK] Stale synthetic demo records cleared; legitimate observations preserved.")
 
         # 2. Ensure Real Schema & Demo Tables
         print("\n[Step 2/7] Verifying e-commerce, security, and demo tables...")
         ensure_default_users(session)
-        ensure_ecommerce_tables(session)
-        session.execute(text("""
-            CREATE TABLE IF NOT EXISTS telemetry_demo_orders (
-                id SERIAL PRIMARY KEY,
-                customer_id INT NOT NULL,
-                amount NUMERIC(10, 2) NOT NULL,
-                status VARCHAR(32) NOT NULL,
-                created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-                payload TEXT
-            );
-        """))
-        demo_count = session.execute(text("SELECT count(*) FROM telemetry_demo_orders;")).scalar() or 0
-        if demo_count < 5000:
-            print("  - Seeding 10,000 demo orders...")
+        if is_postgres:
+            ensure_ecommerce_tables(session)
             session.execute(text("""
-                INSERT INTO telemetry_demo_orders (customer_id, amount, status, created_at)
-                SELECT (g % 300) + 1,
-                       round((random() * 1200 + 10)::numeric, 2),
-                       CASE (g % 4)
-                           WHEN 0 THEN 'pending'
-                           WHEN 1 THEN 'completed'
-                           WHEN 2 THEN 'processing'
-                           ELSE 'cancelled'
-                       END,
-                       now() - ((g % 60) || ' days')::interval
-                FROM generate_series(1, 10000) AS g;
+                CREATE TABLE IF NOT EXISTS telemetry_demo_orders (
+                    id SERIAL PRIMARY KEY,
+                    customer_id INT NOT NULL,
+                    amount NUMERIC(10, 2) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+                    payload TEXT
+                );
             """))
-            session.commit()
-        print(f"  [OK] Demo orders ready: {session.execute(text('SELECT count(*) FROM telemetry_demo_orders;')).scalar()} rows.")
+            demo_count = session.execute(text("SELECT count(*) FROM telemetry_demo_orders;")).scalar() or 0
+            if demo_count < 5000:
+                print("  - Seeding 10,000 demo orders...")
+                session.execute(text("""
+                    INSERT INTO telemetry_demo_orders (customer_id, amount, status, created_at)
+                    SELECT (g % 300) + 1,
+                           round((random() * 1200 + 10)::numeric, 2),
+                           CASE (g % 4)
+                               WHEN 0 THEN 'pending'
+                               WHEN 1 THEN 'completed'
+                               WHEN 2 THEN 'processing'
+                               ELSE 'cancelled'
+                           END,
+                           now() - ((g % 60) || ' days')::interval
+                    FROM generate_series(1, 10000) AS g;
+                """))
+                session.commit()
+            print(f"  [OK] Demo orders ready: {session.execute(text('SELECT count(*) FROM telemetry_demo_orders;')).scalar()} rows.")
 
-        # 3. Create Multi-Snapshot Historical Progression (Extended Multi-Day Enterprise Timeline)
-        print("\n[Step 3/7] Generating 7 sequential telemetry snapshots (Extended 7-Day & 24-Hour Timeline)...")
+        # 3. Create Multi-Snapshot Historical Progression (Explicitly tagged SYNTHETIC_DEMO)
+        print("\n[Step 3/7] Generating 7 sequential synthetic demo snapshots (Extended 7-Day & 24-Hour Timeline)...")
         now = datetime.now(timezone.utc)
         snapshots = []
 
-        # Snapshot 1: 7 days ago (Weekly baseline)
-        s1 = WorkloadSnapshot(
-            captured_at=now - timedelta(days=7),
-            window_seconds=604800.0,
-            total_calls=1250000,
-            total_exec_time_ms=384000000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s1); session.flush(); snapshots.append(s1)
+        snapshot_specs = [
+            (now - timedelta(days=7), 604800.0, 1250000, 384000000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (now - timedelta(days=3), 259200.0, 780000, 210000000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (now - timedelta(hours=24), 86400.0, 340000, 95000000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (now - timedelta(hours=12), 43200.0, 195000, 56000000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (now - timedelta(hours=6), 21600.0, 98000, 28000000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (now - timedelta(hours=1), 3600.0, 22000, 6400000.0, len(COMPREHENSIVE_QUERIES), 21),
+            (
+                now,
+                86400.0,
+                sum(q["calls"] for q in COMPREHENSIVE_QUERIES),
+                sum(q["calls"] * q["mean_ms"] for q in COMPREHENSIVE_QUERIES),
+                len(COMPREHENSIVE_QUERIES),
+                sum(1 for q in COMPREHENSIVE_QUERIES if q["mean_ms"] >= 100.0),
+            ),
+        ]
 
-        # Snapshot 2: 3 days ago
-        s2 = WorkloadSnapshot(
-            captured_at=now - timedelta(days=3),
-            window_seconds=259200.0,
-            total_calls=780000,
-            total_exec_time_ms=210000000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s2); session.flush(); snapshots.append(s2)
+        for cap_at, win_sec, tot_calls, tot_exec_ms, uniq_q, slow_q in snapshot_specs:
+            snap = WorkloadSnapshot(
+                captured_at=cap_at,
+                window_seconds=win_sec,
+                total_calls=tot_calls,
+                total_exec_time_ms=tot_exec_ms,
+                unique_queries=uniq_q,
+                slow_queries=slow_q,
+                provenance_state=ProvenanceState.SYNTHETIC_DEMO.value,
+                source_identifier=demo_source,
+                collection_status="synthetic_seed",
+                collection_error=None,
+                is_synthetic=True,
+                is_measured=False,
+            )
+            session.add(snap)
+            session.flush()
+            snapshots.append(snap)
 
-        # Snapshot 3: 24 hours ago (Daily window)
-        s3 = WorkloadSnapshot(
-            captured_at=now - timedelta(hours=24),
-            window_seconds=86400.0,
-            total_calls=340000,
-            total_exec_time_ms=95000000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s3); session.flush(); snapshots.append(s3)
+        s7 = snapshots[-1]
 
-        # Snapshot 4: 12 hours ago
-        s4 = WorkloadSnapshot(
-            captured_at=now - timedelta(hours=12),
-            window_seconds=43200.0,
-            total_calls=195000,
-            total_exec_time_ms=56000000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s4); session.flush(); snapshots.append(s4)
-
-        # Snapshot 5: 6 hours ago
-        s5 = WorkloadSnapshot(
-            captured_at=now - timedelta(hours=6),
-            window_seconds=21600.0,
-            total_calls=98000,
-            total_exec_time_ms=28000000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s5); session.flush(); snapshots.append(s5)
-
-        # Snapshot 6: 1 hour ago
-        s6 = WorkloadSnapshot(
-            captured_at=now - timedelta(hours=1),
-            window_seconds=3600.0,
-            total_calls=22000,
-            total_exec_time_ms=6400000.0,
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=21,
-        )
-        session.add(s6); session.flush(); snapshots.append(s6)
-
-        # Snapshot 7: Current Cumulative 24-Hour Production Observation Window
-        s7 = WorkloadSnapshot(
-            captured_at=now,
-            window_seconds=86400.0,
-            total_calls=sum(q["calls"] for q in COMPREHENSIVE_QUERIES),
-            total_exec_time_ms=sum(q["calls"] * q["mean_ms"] for q in COMPREHENSIVE_QUERIES),
-            unique_queries=len(COMPREHENSIVE_QUERIES),
-            slow_queries=sum(1 for q in COMPREHENSIVE_QUERIES if q["mean_ms"] >= 100.0),
-        )
-        session.add(s7); session.flush(); snapshots.append(s7)
-
-        # 4. Populate Query Statistics for the latest snapshot
-        print("\n[Step 4/7] Registering 28 comprehensive queries with 24-hour observation telemetry...")
+        # 4. Populate Query Statistics for the latest synthetic snapshot
+        print("\n[Step 4/7] Registering 28 comprehensive synthetic demo queries...")
         try:
             import xxhash
             def _hash64(data: bytes) -> int:
@@ -631,7 +655,12 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
             def _hash64(data: bytes) -> int:
                 return int.from_bytes(hashlib.sha256(data).digest()[:8], "big")
 
-        db_name = session.execute(text("SELECT current_database();")).scalar() or "dbzenith"
+        db_name = "dbzenith"
+        if is_postgres:
+            try:
+                db_name = session.execute(text("SELECT current_database();")).scalar() or "dbzenith"
+            except Exception:
+                db_name = "dbzenith"
         persisted_query_stats = []
 
         for idx, item in enumerate(COMPREHENSIVE_QUERIES, 1):
@@ -640,7 +669,7 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
             if h >= 2**63:
                 h = h - 2**64  # Convert to signed 64-bit bigint
 
-            # Construct mock explain plan structure for fast visualization
+            # Construct synthetic explain plan structure for visualization
             mock_plan = [{
                 "Plan": {
                     "Node Type": item["explain_type"],
@@ -693,26 +722,35 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
                 query_frequency_per_minute=round(item["calls"] / 1440.0, 2),
                 predicate_info={"table": item["relation"], "type": item["category"]},
                 explain_plan=mock_plan,
+                provenance_state=ProvenanceState.SYNTHETIC_DEMO.value,
+                source_identifier=demo_source,
+                query_fingerprint=compute_query_fingerprint(q_text),
+                captured_at=s7.captured_at,
+                window_seconds=s7.window_seconds,
+                is_synthetic=True,
+                is_measured=False,
             )
             session.add(stat)
             session.flush()
             persisted_query_stats.append(stat)
 
         session.commit()
-        print(f"  [OK] {len(persisted_query_stats)} query statistics recorded across all 3 severity tiers.")
+        print(f"  [OK] {len(persisted_query_stats)} synthetic query statistics recorded across all 3 severity tiers.")
 
         # 5. Run Recommendation Engine
         print("\n[Step 5/7] Synthesizing optimization recommendations across all advisors...")
         engine_svc = RecommendationEngine()
         recs = engine_svc.generate(session, limit=100)
-        print(f"  [OK] {len(recs)} optimization recommendations generated.")
-        for r in recs[:6]:
-            print(f"    - [{r.type}] target={r.target}: {r.proposed_change[:60]}...")
+        synthetic_recs = [r for r in recs if r.is_synthetic or r.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value]
+        print(f"  [OK] {len(recs)} optimization recommendations available ({len(synthetic_recs)} synthetic demo).")
 
-        # 6. Populate Isolated Sandbox Simulations for ALL Recommendations
-        print("\n[Step 6/7] Pre-computing sandbox simulations with before/after plan diffs for ALL recommendations...")
+        # 6. Populate Isolated Sandbox Simulations for Synthetic Recommendations
+        print("\n[Step 6/7] Pre-computing synthetic demo plan estimates for recommendations...")
         sim_count = 0
-        for r in recs:
+        for r in synthetic_recs:
+            existing_sim = session.query(OptimizationSimulation).filter_by(recommendation_id=r.id).first()
+            if existing_sim is not None:
+                continue
             baseline = round(float(r.evidence.get("total_exec_time_ms", 12500) or 12500), 2)
             matching_q = next((q for q in COMPREHENSIVE_QUERIES if r.target and r.target.lower() in q["query"].lower()), COMPREHENSIVE_QUERIES[0])
             baseline_latency = round(matching_q["mean_ms"], 2)
@@ -734,42 +772,60 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
                         "operator": f"{matching_q.get('explain_type', 'Scan')} -> Optimized Index/Rewrite Path",
                         "speedup": f"{speedup_pct}%",
                         "cost_delta": round(baseline - proposed, 2),
-                        "detail": f"Latency projected from {baseline_latency}ms to {sim_latency}ms ({speedup_factor}x faster)",
+                        "detail": f"Estimated cost reduction from {baseline} to {proposed} (hypothetical plan estimate; not a measured benchmark speedup)",
                     }
                 ],
                 estimated_storage_impact={"estimated_index_bytes": 1843200, "formatted": "1.8 MB"},
                 write_overhead_estimate={"insert_overhead_pct": 3.2, "update_overhead_pct": 1.8},
                 confidence=r.confidence,
+                limitations=[
+                    "Synthetic demo plan cost estimate — not a measured runtime benchmark improvement.",
+                    "No production DDL or table locks were executed.",
+                ],
                 benchmark={
-                    "runs": 5,
+                    "runs": 0,
+                    "is_measured": False,
+                    "provenance_state": ProvenanceState.SYNTHETIC_DEMO.value,
+                    "result_type": ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+                    "simulation_method": "synthetic_demo_estimate",
                     "simulated_latency_ms": sim_latency,
+                    "estimated_latency_ms": sim_latency,
+                    "measured_latency_ms": None,
                     "baseline_latency_ms": baseline_latency,
                     "p50_baseline_ms": baseline_latency,
                     "p50_simulated_ms": sim_latency,
                     "improvement_pct": speedup_pct,
                     "speedup_factor": speedup_factor,
+                    "method": "synthetic_demo_estimate (hypothetical planner cost ratio; not a measured benchmark)",
                 },
                 baseline_plans=[{"Node Type": matching_q.get("explain_type", "Seq Scan"), "Total Cost": baseline}],
                 proposed_plans=[{"Node Type": "Index Scan", "Total Cost": proposed}],
+                provenance_state=ProvenanceState.SYNTHETIC_DEMO.value,
+                source_identifier=demo_source,
+                simulation_method="synthetic_demo_estimate",
+                result_type=ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+                is_synthetic=True,
+                is_measured=False,
+                model_version="hypopg-analytical-v0.7.0",
             )
             session.add(sim)
             sim_count += 1
 
         session.commit()
-        print(f"  [OK] {sim_count} isolated sandbox simulations populated with complete before/after cost & latency metrics.")
+        print(f"  [OK] {sim_count} synthetic demo plan estimates populated.")
 
-        # 7. Seed Human Approval Decisions & Security Audit Ledger
+        # 7. Seed Human Approval Decisions & Security Audit Ledger (only on synthetic pending recommendations)
         print("\n[Step 7/7] Seeding Human Approval Center decisions & Audit Ledger...")
-        # Mark one recommendation as approved with operator justification
-        if len(recs) > 1:
-            recs[0].status = "approved"
+        pending_synthetic = [r for r in synthetic_recs if r.status == "pending"]
+        if len(pending_synthetic) > 1:
+            pending_synthetic[0].status = "approved"
             session.add(RecommendationAuditEvent(
-                recommendation_id=recs[0].id,
+                recommendation_id=pending_synthetic[0].id,
                 action="APPROVE",
                 previous_status="pending",
                 new_status="approved",
-                reason="Verified in HypoPG sandbox with 74.5% latency reduction. Approved for production migration window.",
-                metadata_json=json.dumps({"operator_role": "DBA", "approved_by": "lead_dba@internal"}),
+                reason="Verified in HypoPG sandbox with 74.5% cost reduction (synthetic demo seed).",
+                metadata_json=json.dumps({"operator_role": "DBA", "approved_by": "lead_dba@internal", "is_synthetic": True}),
             ))
             session.add(SecurityAuditEvent(
                 event_category="APPROVAL_CENTER",
@@ -777,21 +833,24 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
                 actor_username="lead_dba",
                 actor_role="DBA",
                 target_entity="OptimizationRecommendation",
-                target_id=str(recs[0].id),
+                target_id=str(pending_synthetic[0].id),
                 status="SUCCESS",
-                details_json=json.dumps({"proposed_change": recs[0].proposed_change, "benefit": recs[0].expected_benefit}),
+                details_json=json.dumps({
+                    "proposed_change": pending_synthetic[0].proposed_change,
+                    "benefit": pending_synthetic[0].expected_benefit,
+                    "is_synthetic": True,
+                }),
             ))
 
-        # Mark another recommendation as rejected with justification
-        if len(recs) > 2:
-            recs[1].status = "rejected"
+        if len(pending_synthetic) > 2:
+            pending_synthetic[1].status = "rejected"
             session.add(RecommendationAuditEvent(
-                recommendation_id=recs[1].id,
+                recommendation_id=pending_synthetic[1].id,
                 action="REJECT",
                 previous_status="pending",
                 new_status="rejected",
-                reason="Write overhead exceeds 5% SLA threshold on high-frequency table; deferred to maintenance window.",
-                metadata_json=json.dumps({"operator_role": "DBA", "rejected_by": "lead_dba@internal"}),
+                reason="Write overhead exceeds 5% SLA threshold on high-frequency table (synthetic demo seed).",
+                metadata_json=json.dumps({"operator_role": "DBA", "rejected_by": "lead_dba@internal", "is_synthetic": True}),
             ))
             session.add(SecurityAuditEvent(
                 event_category="APPROVAL_CENTER",
@@ -799,57 +858,38 @@ def generate_comprehensive_workload(db_url: str | None = None) -> dict:
                 actor_username="lead_dba",
                 actor_role="DBA",
                 target_entity="OptimizationRecommendation",
-                target_id=str(recs[1].id),
+                target_id=str(pending_synthetic[1].id),
                 status="SUCCESS",
-                details_json=json.dumps({"reason": "SLA write overhead threshold exceeded"}),
+                details_json=json.dumps({"reason": "SLA write overhead threshold exceeded", "is_synthetic": True}),
             ))
 
-        # Add general security audit events to populate the Audit page
-        session.add(SecurityAuditEvent(
-            event_category="AUTHENTICATION",
-            action="USER_LOGIN",
-            actor_username="lead_dba",
-            actor_role="DBA",
-            target_entity="Session",
-            status="SUCCESS",
-            details_json=json.dumps({"auth_method": "PBKDF2-HMAC-SHA256"}),
-        ))
         session.add(SecurityAuditEvent(
             event_category="TELEMETRY",
-            action="SNAPSHOT_COLLECTED",
-            actor_username="system_collector",
+            action="DEMO_WORKLOAD_SEEDED",
+            actor_username="system_seeder",
             actor_role="SYSTEM",
             target_entity="WorkloadSnapshot",
+            target_id=str(s7.id),
             status="SUCCESS",
-            details_json=json.dumps({"queries_captured": len(COMPREHENSIVE_QUERIES)}),
+            details_json=json.dumps({"queries_captured": len(COMPREHENSIVE_QUERIES), "is_synthetic": True}),
         ))
         session.commit()
-        print("  [OK] Approval decisions and Security Audit ledger events recorded.")
-
-        print("\n" + "=" * 70)
-        print("COMPREHENSIVE WORKLOAD GENERATION COMPLETED SUCCESSFULLY!")
-        print("=" * 70)
-        print("Summary:")
-        print(f"  * Total Registered Queries: {len(COMPREHENSIVE_QUERIES)}")
-        print(f"  * Snapshots Created: {len(snapshots)} (Extended 7-Day & 24-Hour Timeline)")
-        print("  * Critical Latency Queries (>=500ms): 6")
-        print("  * High Latency Queries (100-499ms): 16")
-        print("  * Fast Baseline Queries (<100ms): 6")
-        print(f"  * Optimization Recommendations: {len(recs)}")
-        print(f"  * HypoPG Virtual Sandbox Simulations: {sim_count} (100% Coverage)")
-        print(f"  * Human Approval Decisions Seeded: 2 (1 Approved, 1 Rejected, {len(recs) - 2} Pending)")
-        print("=" * 70)
+        print("  [OK] Synthetic demo approval decisions and audit ledger events recorded.")
 
         return {
             "status": "success",
+            "provenance_state": ProvenanceState.SYNTHETIC_DEMO.value,
+            "is_synthetic": True,
             "queries_count": len(COMPREHENSIVE_QUERIES),
             "recommendations_count": len(recs),
             "simulations_count": sim_count,
         }
 
     finally:
-        session.close()
-        engine.dispose()
+        if owns_session:
+            session.close()
+            if engine is not None:
+                engine.dispose()
 
 
 if __name__ == "__main__":
@@ -1011,19 +1051,55 @@ def ensure_ecommerce_tables(session) -> None:
 
 
 def ensure_default_users(session) -> None:
-    """Seeds default operator accounts (ADMIN, DBA, ANALYST, VIEWER) when security_users is empty."""
+    """Idempotently seeds default operator accounts (ADMIN, DBA, ANALYST, VIEWER) using PBKDF2-HMAC-SHA256."""
+    import secrets
+    from app.core.config import get_settings
     from app.core.security import hash_password, Role
 
+    settings = get_settings()
+    is_prod = settings.app_env.lower() == "production"
+
+    def _resolve_bootstrap_pwd(env_name: str, cfg_val: str | None, dev_fallback: str) -> str:
+        val = os.getenv(env_name) or cfg_val
+        if val:
+            return val
+        return secrets.token_urlsafe(24) if is_prod else dev_fallback
+
     try:
-        user_count = session.query(User).count()
-        if user_count == 0:
-            defaults = [
-                ("admin", "admin@dbzenith.local", "DBZenith_Admin_2026!", Role.ADMIN.value),
-                ("dba_operator", "dba@dbzenith.local", "DBZenith_DBA_2026!", Role.DBA.value),
-                ("analyst", "analyst@dbzenith.local", "DBZenith_Analyst_2026!", Role.ANALYST.value),
-                ("viewer", "viewer@dbzenith.local", "DBZenith_Viewer_2026!", Role.VIEWER.value),
-            ]
-            for uname, email, pwd, role_val in defaults:
+        defaults = [
+            (
+                "admin",
+                "admin@dbzenith.local",
+                _resolve_bootstrap_pwd("BOOTSTRAP_ADMIN_PASSWORD", settings.bootstrap_admin_password, "DBZenith_Admin_2026!"),
+                Role.ADMIN.value,
+            ),
+            (
+                "dba_operator",
+                "dba@dbzenith.local",
+                _resolve_bootstrap_pwd("BOOTSTRAP_DBA_PASSWORD", settings.bootstrap_dba_password, "DBZenith_DBA_2026!"),
+                Role.DBA.value,
+            ),
+            (
+                "analyst",
+                "analyst@dbzenith.local",
+                _resolve_bootstrap_pwd("BOOTSTRAP_ANALYST_PASSWORD", settings.bootstrap_analyst_password, "DBZenith_Analyst_2026!"),
+                Role.ANALYST.value,
+            ),
+            (
+                "viewer",
+                "viewer@dbzenith.local",
+                _resolve_bootstrap_pwd("BOOTSTRAP_VIEWER_PASSWORD", settings.bootstrap_viewer_password, "DBZenith_Viewer_2026!"),
+                Role.VIEWER.value,
+            ),
+        ]
+        created_any = False
+        for uname, email, pwd, role_val in defaults:
+            existing = (
+                session.query(User)
+                .filter((User.username == uname) | (User.email == email))
+                .first()
+            )
+            if existing is None:
                 pwd_hash, salt = hash_password(pwd)
                 session.add(
                     User(
@@ -1035,6 +1111,8 @@ def ensure_default_users(session) -> None:
                         is_active=True,
                     )
                 )
+                created_any = True
+        if created_any:
             session.commit()
     except Exception as exc:
         session.rollback()
@@ -1042,26 +1120,53 @@ def ensure_default_users(session) -> None:
 
 
 def auto_seed_if_empty(session_or_db_url=None) -> bool:
-    """Checks if telemetry database has zero snapshots or zero query statistics. If so, automatically seeds comprehensive workload."""
+    """Checks if telemetry database is empty and, when enable_demo_seed is True, seeds synthetic demo workload.
+
+    Never overwrites or deletes existing legitimate observations, recommendations, simulations, or audit events.
+    """
+    from sqlalchemy.orm import Session as OrmSession
     from app.core.config import get_settings
     from app.models.workload import WorkloadSnapshot, QueryStatistic
     from app.db.base import Base
 
     settings = get_settings()
+
+    if isinstance(session_or_db_url, OrmSession):
+        session = session_or_db_url
+        try:
+            if session.bind is not None:
+                ensure_provenance_schema(session.bind)
+            ensure_default_users(session)
+            if not settings.enable_demo_seed:
+                return False
+            count = session.query(WorkloadSnapshot).count()
+            query_count = session.query(QueryStatistic).count()
+            if count == 0 and query_count == 0:
+                generate_comprehensive_workload(existing_session=session)
+                return True
+        except Exception as e:
+            print(f"[AutoSeed] Warning: {e}", flush=True)
+        return False
+
     db_url = session_or_db_url if isinstance(session_or_db_url, str) else settings.database_url
     engine = create_engine(db_url, pool_pre_ping=True)
     try:
         Base.metadata.create_all(bind=engine)
+        ensure_provenance_schema(engine)
         SessionFactory = sessionmaker(bind=engine)
         with SessionFactory() as session:
             try:
                 ensure_default_users(session)
-                ensure_ecommerce_tables(session)
+                if not settings.enable_demo_seed:
+                    print("[AutoSeed] Synthetic demo seeding is disabled via ENABLE_DEMO_SEED=false.", flush=True)
+                    return False
+                if engine.dialect.name == "postgresql":
+                    ensure_ecommerce_tables(session)
                 count = session.query(WorkloadSnapshot).count()
                 query_count = session.query(QueryStatistic).count()
-                if count == 0 or query_count == 0:
-                    print("[AutoSeed] Database is uninitialized or empty. Auto-seeding comprehensive workload...", flush=True)
-                    generate_comprehensive_workload(db_url)
+                if count == 0 and query_count == 0:
+                    print("[AutoSeed] Database is uninitialized or empty. Auto-seeding synthetic demo workload...", flush=True)
+                    generate_comprehensive_workload(db_url=db_url)
                     return True
             except Exception as e:
                 print(f"[AutoSeed] Warning: {e}", flush=True)

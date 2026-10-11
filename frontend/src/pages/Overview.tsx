@@ -17,6 +17,11 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import {
+  ProvenanceBadge,
+  TelemetryTransparencyBanner,
+  formatCollectionTimestamp,
+} from '../components/ProvenanceBadge'
 import { useAuth } from '../context/AuthContext'
 
 function formatMs(value: number) {
@@ -24,7 +29,7 @@ function formatMs(value: number) {
 }
 
 function formatWindow(seconds: number | undefined | null) {
-  if (!seconds || seconds <= 0) return 'Recent'
+  if (!seconds || seconds <= 0) return 'Window not recorded'
   if (seconds >= 86400) {
     const days = Math.round(seconds / 86400)
     return `${days} ${days === 1 ? 'Day' : 'Days'} (${seconds.toLocaleString()}s)`
@@ -165,7 +170,13 @@ export function Overview() {
     <section>
       <div className="hero" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+              prefix="DATA SOURCE"
+            />
             <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
             <span className="status online">API: {health?.status ?? 'online'}</span>
             <span className="badge badge-ai-analysis">GNN & RL ENGINE ACTIVE</span>
@@ -216,6 +227,9 @@ export function Overview() {
 
       {error && <div className="alert">{error}</div>}
 
+      {/* Data Provenance & Telemetry Transparency Banner */}
+      <TelemetryTransparencyBanner summary={summary} />
+
       {/* Visual Pipeline Flow Header */}
       <OptimizationFlowHeader currentStage="detect" />
 
@@ -244,7 +258,11 @@ export function Overview() {
         <article className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Total Calls</h2>
-            <span className="badge badge-observed">OBSERVED</span>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+            />
           </div>
           <strong style={{ fontSize: '26px' }}>{summary?.total_calls.toLocaleString() ?? '0'}</strong>
           <p>Total query executions recorded</p>
@@ -253,7 +271,11 @@ export function Overview() {
         <article className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Cumulative Time</h2>
-            <span className="badge badge-observed">OBSERVED</span>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+            />
           </div>
           <strong style={{ fontSize: '26px' }}>{summary ? formatMs(summary.total_exec_time_ms) : '0 ms'}</strong>
           <p>Execution time across all workers</p>
@@ -262,7 +284,11 @@ export function Overview() {
         <article className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Unique Queries</h2>
-            <span className="badge badge-observed">OBSERVED</span>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+            />
           </div>
           <strong style={{ fontSize: '26px' }}>{summary?.unique_queries ?? 0}</strong>
           <p>Distinct normalized query templates</p>
@@ -271,7 +297,11 @@ export function Overview() {
         <article className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Slow Queries</h2>
-            <span className="badge badge-observed">OBSERVED</span>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+            />
           </div>
           <strong style={{ fontSize: '26px', color: (summary?.slow_queries ?? 0) > 0 ? '#b91c1c' : '#166534' }}>
             {summary?.slow_queries ?? 0}
@@ -325,7 +355,11 @@ export function Overview() {
             <h2 style={{ margin: 0 }}>Top Workload Queries</h2>
             <span className="muted">Ranked by total execution impact from pg_stat_statements</span>
           </div>
-          <span className="badge badge-observed">OBSERVED</span>
+          <ProvenanceBadge
+            badge={summary?.provenance_badge}
+            state={summary?.provenance_state}
+            isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+          />
         </div>
 
         {summary?.top_queries?.length ? (
@@ -334,6 +368,7 @@ export function Overview() {
               <thead>
                 <tr>
                   <th>Query ID</th>
+                  <th>Provenance</th>
                   <th>Calls</th>
                   <th>Mean Latency</th>
                   <th>Total Time</th>
@@ -345,6 +380,13 @@ export function Overview() {
                 {summary.top_queries.map((q) => (
                   <tr key={q.query_id}>
                     <td><code>{q.query_id}</code></td>
+                    <td>
+                      <ProvenanceBadge
+                        badge={q.provenance_badge || summary?.provenance_badge}
+                        state={q.provenance_state || summary?.provenance_state}
+                        isSynthetic={q.is_synthetic ?? summary?.is_synthetic}
+                      />
+                    </td>
                     <td>{q.calls.toLocaleString()}</td>
                     <td>
                       <span className={q.mean_exec_time_ms > 100 ? 'badge sev-high' : 'badge sev-low'}>
@@ -390,7 +432,11 @@ export function Overview() {
               <h2 style={{ margin: 0 }}>Telemetry Snapshot History</h2>
               <span className="muted">Periodic captures from the background worker</span>
             </div>
-            <span className="badge badge-observed">OBSERVED</span>
+            <ProvenanceBadge
+              badge={summary?.provenance_badge}
+              state={summary?.provenance_state}
+              isSynthetic={summary?.is_synthetic || summary?.demo_mode_active}
+            />
           </div>
 
           <div className="table-wrap">
@@ -398,6 +444,7 @@ export function Overview() {
               <thead>
                 <tr>
                   <th>Snapshot ID</th>
+                  <th>Provenance</th>
                   <th>Captured At</th>
                   <th>Window Duration</th>
                   <th>Total Calls</th>
@@ -409,8 +456,15 @@ export function Overview() {
                 {snapshots.map((s, idx) => (
                   <tr key={String(s.id ?? idx)}>
                     <td><code>#{String(s.id ?? idx)}</code></td>
-                    <td>{s.captured_at ? new Date(String(s.captured_at)).toLocaleString() : 'Recent'}</td>
-                    <td><span className="badge badge-observed" style={{ fontSize: '11px' }}>{formatWindow(Number(s.window_seconds ?? 60))}</span></td>
+                    <td>
+                      <ProvenanceBadge
+                        badge={s.provenance_badge ? String(s.provenance_badge) : undefined}
+                        state={s.provenance_state ? String(s.provenance_state) : undefined}
+                        isSynthetic={Boolean(s.is_synthetic)}
+                      />
+                    </td>
+                    <td>{formatCollectionTimestamp(s.captured_at ? String(s.captured_at) : null)}</td>
+                    <td><span className="badge badge-observed" style={{ fontSize: '11px' }}>{formatWindow(Number(s.window_seconds ?? 0))}</span></td>
                     <td>{Number(s.total_calls ?? 0).toLocaleString()}</td>
                     <td>{formatMs(Number(s.total_exec_time_ms ?? 0))}</td>
                     <td>

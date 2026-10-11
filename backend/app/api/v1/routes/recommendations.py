@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_analyst, require_dba_or_admin, require_viewer
+from app.core.auth import DB_CONCURRENCY_LOCK as _DECISION_LOCK, require_analyst, require_dba_or_admin, require_viewer
 from app.core.security import Role, TokenPayload
 from app.db.session import get_db
 from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
@@ -16,7 +16,6 @@ from app.services.audit.recorder import AuditEventCategory
 from app.services.recommendations.engine import RecommendationEngine
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
-_DECISION_LOCK = threading.Lock()
 
 
 def _response(row: OptimizationRecommendation) -> RecommendationResponse:
@@ -107,6 +106,40 @@ def get_recommendation_trace(
         .all()
     )
 
+    from app.core.config import get_settings
+    from app.core.provenance import resolve_observation_provenance
+
+    def _serialize_matching_stat(stat: QueryStatistic) -> dict[str, Any]:
+        snap = getattr(stat, "snapshot", None)
+        cap_at = getattr(snap, "captured_at", None) if snap is not None else None
+        is_syn = bool(stat.is_synthetic) or bool(getattr(snap, "is_synthetic", False) if snap is not None else False)
+        raw_state = stat.provenance_state or (getattr(snap, "provenance_state", None) if snap is not None else None)
+        resolved = resolve_observation_provenance(
+            provenance_state=raw_state,
+            is_synthetic=is_syn,
+            captured_at=cap_at,
+            staleness_threshold_seconds=get_settings().telemetry_staleness_seconds,
+            is_latest=True,
+        )
+        return {
+            "query_id": stat.query_id,
+            "normalized_query": stat.normalized_query,
+            "mean_exec_time_ms": stat.mean_exec_time_ms,
+            "calls": stat.calls,
+            "total_exec_time_ms": stat.total_exec_time_ms,
+            "rows": stat.rows,
+            "explain_plan": stat.explain_plan,
+            "captured_at": cap_at.isoformat() if cap_at else None,
+            "provenance_state": resolved["provenance_state"],
+            "provenance_badge": resolved["provenance_badge"],
+            "source_identifier": stat.source_identifier,
+            "query_fingerprint": stat.query_fingerprint,
+            "is_synthetic": resolved["is_synthetic"],
+            "is_measured": resolved["is_measured"],
+            "is_stale": resolved["is_stale"],
+            "staleness_warning": resolved["staleness_warning"],
+        }
+
     matching_queries: list[dict[str, Any]] = []
     if row.affected_queries:
         for aq in row.affected_queries:
@@ -114,15 +147,7 @@ def get_recommendation_trace(
             if qid:
                 stat = db.query(QueryStatistic).filter(QueryStatistic.query_id == qid).order_by(QueryStatistic.id.desc()).first()
                 if stat:
-                    matching_queries.append({
-                        "query_id": stat.query_id,
-                        "normalized_query": stat.normalized_query,
-                        "mean_exec_time_ms": stat.mean_exec_time_ms,
-                        "calls": stat.calls,
-                        "total_exec_time_ms": stat.total_exec_time_ms,
-                        "rows": stat.rows,
-                        "explain_plan": stat.explain_plan,
-                    })
+                    matching_queries.append(_serialize_matching_stat(stat))
 
     if not matching_queries and row.target:
         stats = (
@@ -133,15 +158,7 @@ def get_recommendation_trace(
             .all()
         )
         for stat in stats:
-            matching_queries.append({
-                "query_id": stat.query_id,
-                "normalized_query": stat.normalized_query,
-                "mean_exec_time_ms": stat.mean_exec_time_ms,
-                "calls": stat.calls,
-                "total_exec_time_ms": stat.total_exec_time_ms,
-                "rows": stat.rows,
-                "explain_plan": stat.explain_plan,
-            })
+            matching_queries.append(_serialize_matching_stat(stat))
 
     return {
         "recommendation": _response(row).model_dump(),

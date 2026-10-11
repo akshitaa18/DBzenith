@@ -9,6 +9,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.provenance import ensure_provenance_schema
 from app.db.base import Base
 from app.db.session import get_engine
 from app.services.collector.telemetry import TelemetryWorker
@@ -23,9 +24,11 @@ telemetry_worker = TelemetryWorker()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("application_started", extra={"event": "application_started", "environment": settings.app_env})
-    # Ensure database schema is created and auto-seed comprehensive workload if fresh
+    # Ensure database schema is created and auto-seed comprehensive workload if fresh and enabled
     try:
-        Base.metadata.create_all(bind=get_engine())
+        engine = get_engine()
+        Base.metadata.create_all(bind=engine)
+        ensure_provenance_schema(engine)
         auto_seed_if_empty()
     except Exception as exc:
         logger.warning(f"Database auto-seed / table initialization skipped: {exc}")
@@ -48,7 +51,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

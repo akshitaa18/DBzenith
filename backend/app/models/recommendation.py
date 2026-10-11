@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,12 @@ class OptimizationRecommendation(Base):
     affected_queries: Mapped[list] = mapped_column(JSONB, nullable=False)
     requires_approval: Mapped[bool] = mapped_column(default=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    provenance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="HYPOTHETICAL_PLAN_ESTIMATE", index=True)
+    source_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    query_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    is_measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True, default="advisor-engine-v0.7.0")
 
 
 class RecommendationAuditEvent(Base):

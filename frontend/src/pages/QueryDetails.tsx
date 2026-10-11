@@ -17,6 +17,12 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import {
+  EstimateVsMeasuredNotice,
+  ProvenanceBadge,
+  formatCollectionTimestamp,
+} from '../components/ProvenanceBadge'
+import { useAuth } from '../context/AuthContext'
 
 function formatMs(value: number | undefined | null) {
   if (value === undefined || value === null) return '0.00 ms'
@@ -24,6 +30,7 @@ function formatMs(value: number | undefined | null) {
 }
 
 export function QueryDetails() {
+  const { canSimulate, canApprove } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [queryIdInput, setQueryIdInput] = useState('')
   const [detail, setDetail] = useState<QueryDetail | null>(null)
@@ -163,7 +170,7 @@ export function QueryDetails() {
     try {
       const qid = detail.id || detail.query_id
       await calculateQueryOptimizations(qid)
-      setCalcSuccessMsg('✓ Evaluated and calculated before/after plan costs and simulated latencies for this query!')
+      setCalcSuccessMsg('✓ Evaluated and calculated hypothetical before/after plan cost estimates for this query!')
       loadQuery(qid, true)
     } catch (err: any) {
       setError(err?.message || 'Failed to calculate optimization for this query.')
@@ -174,6 +181,7 @@ export function QueryDetails() {
 
   const handleSimulate = async (recId: number) => {
     setIsSimulating(true)
+    setError(null)
     try {
       await createSimulation(recId, 3)
       if (detail) {
@@ -181,7 +189,7 @@ export function QueryDetails() {
         setTraceData(refreshed)
       }
     } catch (err: any) {
-      alert(`Simulation failed: ${err.message}`)
+      setError(`Simulation failed: ${err?.message || 'Unable to run simulation'}`)
     } finally {
       setIsSimulating(false)
     }
@@ -189,6 +197,7 @@ export function QueryDetails() {
 
   const handleApprove = async (recId: number) => {
     setIsDeciding(true)
+    setError(null)
     try {
       await approveRecommendation(recId, 'Approved via Query Details')
       if (detail) {
@@ -196,7 +205,7 @@ export function QueryDetails() {
         setTraceData(refreshed)
       }
     } catch (err: any) {
-      alert(`Approval failed: ${err.message}`)
+      setError(`Approval failed: ${err?.message || 'Unable to approve recommendation'}`)
     } finally {
       setIsDeciding(false)
     }
@@ -204,6 +213,7 @@ export function QueryDetails() {
 
   const handleReject = async (recId: number) => {
     setIsDeciding(true)
+    setError(null)
     try {
       await rejectRecommendation(recId, 'Rejected via Query Details')
       if (detail) {
@@ -211,7 +221,7 @@ export function QueryDetails() {
         setTraceData(refreshed)
       }
     } catch (err: any) {
-      alert(`Rejection failed: ${err.message}`)
+      setError(`Rejection failed: ${err?.message || 'Unable to reject recommendation'}`)
     } finally {
       setIsDeciding(false)
     }
@@ -253,7 +263,15 @@ export function QueryDetails() {
       <div className="section-head" style={{ marginBottom: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+              {detail && (
+                <ProvenanceBadge
+                  badge={detail.provenance_badge}
+                  state={detail.provenance_state}
+                  isSynthetic={detail.is_synthetic}
+                  prefix="DATA SOURCE"
+                />
+              )}
               <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
               <span className="badge badge-observed">Telemetry Inspector</span>
               <span className="badge badge-ai-analysis">AI Privacy Gateway: Enforced</span>
@@ -308,7 +326,7 @@ export function QueryDetails() {
         </button>
         {detail && (
           <span style={{ fontSize: '12px', color: '#64748b' }}>
-            Viewing Query #{detail.query_id} (Database: {detail.database_name || 'dbzenith'})
+            Viewing Query #{detail.query_id} • Source: <code>{detail.source_identifier || detail.database_name || 'dbzenith'}</code> • Captured: <strong>{formatCollectionTimestamp(detail.captured_at)}</strong>
           </span>
         )}
       </form>
@@ -317,20 +335,39 @@ export function QueryDetails() {
 
       {detail && (
         <>
+          {detail.is_stale && detail.staleness_warning && (
+            <div className="card" style={{ borderLeft: '4px solid #94a3b8', background: 'rgba(148, 163, 184, 0.1)', color: '#e2e8f0', padding: '12px 16px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <ProvenanceBadge badge="HISTORICAL" />
+                <strong>Historical / Stale Observation Warning</strong>
+              </div>
+              <div>{detail.staleness_warning}</div>
+            </div>
+          )}
+
           {/* ======================================================== */}
           {/* SECTION A: QUERY OVERVIEW (OBSERVED TELEMETRY)          */}
           {/* ======================================================== */}
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span className="badge badge-observed" style={{ fontWeight: 700 }}>OBSERVED TELEMETRY</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+              <ProvenanceBadge
+                badge={detail.provenance_badge}
+                state={detail.provenance_state}
+                isSynthetic={detail.is_synthetic}
+              />
               <span style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc' }}>
                 PostgreSQL Operational Metrics (pg_stat_statements)
               </span>
+              {detail.query_fingerprint && (
+                <span style={{ fontSize: '12px', color: '#64748b', fontFamily: 'monospace' }}>
+                  Fingerprint: {detail.query_fingerprint}
+                </span>
+              )}
             </div>
 
             <div className="grid metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Mean Latency</h3>
                 <strong style={{ fontSize: '22px', color: detail.mean_exec_time_ms > 100 ? '#ef4444' : '#10b981' }}>
                   {formatMs(detail.mean_exec_time_ms)}
@@ -341,7 +378,7 @@ export function QueryDetails() {
               </article>
 
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Total Exec Calls</h3>
                 <strong style={{ fontSize: '22px', color: '#38bdf8' }}>{detail.calls.toLocaleString()}</strong>
                 <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#64748b' }}>
@@ -350,7 +387,7 @@ export function QueryDetails() {
               </article>
 
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Total Workload Time</h3>
                 <strong style={{ fontSize: '22px', color: '#f8fafc' }}>
                   {formatMs(detail.total_exec_time_ms)}
@@ -361,7 +398,7 @@ export function QueryDetails() {
               </article>
 
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Buffer Cache Hit Ratio</h3>
                 <strong style={{ fontSize: '22px', color: hitRatio >= 95 ? '#10b981' : '#f59e0b' }}>
                   {hitRatio.toFixed(1)}%
@@ -372,7 +409,7 @@ export function QueryDetails() {
               </article>
 
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Temp Disk Activity</h3>
                 <strong style={{ fontSize: '22px', color: detail.temp_blks_written > 0 ? '#ef4444' : '#64748b' }}>
                   {detail.temp_blks_written.toLocaleString()} blks
@@ -383,7 +420,7 @@ export function QueryDetails() {
               </article>
 
               <article className="card" style={{ padding: '14px' }}>
-                <span className="badge badge-observed" style={{ fontSize: '10px' }}>OBSERVED</span>
+                <ProvenanceBadge badge={detail.provenance_badge} state={detail.provenance_state} isSynthetic={detail.is_synthetic} />
                 <h3 style={{ marginTop: '6px', fontSize: '13px', color: '#94a3b8' }}>Block I/O Latency</h3>
                 <strong style={{ fontSize: '22px', color: '#f8fafc' }}>
                   {formatMs(detail.blk_read_time_ms + detail.blk_write_time_ms)}
@@ -403,16 +440,25 @@ export function QueryDetails() {
             {detail.optimization_summary && (
               <article className="card" style={{ padding: '16px', background: '#090d16', border: '1px solid #10b981', borderRadius: '8px', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span className="badge" style={{ background: '#065f46', color: '#34d399', fontWeight: 700 }}>
                       ⚡ BEFORE VS AFTER OPTIMIZATION
                     </span>
+                    <ProvenanceBadge
+                      badge={detail.optimization_summary.provenance_badge || (detail.optimization_summary.is_measured ? 'SIMULATED' : 'ESTIMATED')}
+                      state={detail.optimization_summary.provenance_state}
+                      isSynthetic={detail.optimization_summary.is_synthetic}
+                    />
                     <span style={{ fontSize: '12px', color: '#94a3b8' }}>
-                      Simulated impact via HypoPG & AST rewriter
+                      {detail.optimization_summary.is_measured
+                        ? 'Measured sandbox benchmark via HypoPG'
+                        : 'Hypothetical planner cost estimate via HypoPG & AST rewriter'}
                     </span>
                   </div>
                   <span style={{ fontSize: '13px', fontWeight: 700, color: '#34d399' }}>
-                    Speedup: {detail.optimization_summary.speedup_factor}x Faster (-{detail.optimization_summary.cost_improvement_pct}%)
+                    {detail.optimization_summary.is_measured
+                      ? `Benchmark Speedup: ${detail.optimization_summary.speedup_factor}x (-${detail.optimization_summary.cost_improvement_pct}%)`
+                      : `Estimated Cost Reduction: -${detail.optimization_summary.cost_improvement_pct}% (Est. ${detail.optimization_summary.speedup_factor}x)`}
                   </span>
                 </div>
 
@@ -442,13 +488,27 @@ export function QueryDetails() {
                   </div>
 
                   <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px' }}>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>Simulated Latency (After)</span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>
+                      {detail.optimization_summary.is_measured ? 'Measured Benchmark Latency' : 'Estimated Latency (Unmeasured)'}
+                    </span>
                     <strong style={{ fontSize: '18px', color: '#38bdf8' }}>
                       {formatMs(detail.optimization_summary.simulated_latency_ms)}
                     </strong>
-                    <small style={{ color: '#38bdf8', fontSize: '10px', display: 'block' }}>{detail.optimization_summary.speedup_factor}x faster runtime</small>
+                    <small style={{ color: '#38bdf8', fontSize: '10px', display: 'block' }}>
+                      {detail.optimization_summary.is_measured
+                        ? `${detail.optimization_summary.speedup_factor}x benchmark runtime`
+                        : `Projected from planner cost (not measured)`}
+                    </small>
                   </div>
                 </div>
+
+                <EstimateVsMeasuredNotice
+                  isMeasured={detail.optimization_summary.is_measured}
+                  isSynthetic={detail.optimization_summary.is_synthetic}
+                  isVerifiedSpeedup={detail.optimization_summary.is_verified_speedup}
+                  explanation={detail.optimization_summary.estimate_vs_measured_explanation}
+                  simulationMethod={detail.optimization_summary.simulation_method}
+                />
 
                 {detail.optimization_summary.proposed_change && (
                   <div style={{ marginTop: '10px', fontSize: '12px', color: '#cbd5e1' }}>
@@ -625,39 +685,47 @@ export function QueryDetails() {
           {/* SECTION D: ACTIONS BAR (RUN GNN / REWRITE / PLANS)     */}
           {/* ======================================================== */}
           <div className="card" style={{ padding: '16px', background: '#0b1120', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <button
-                className="btn btn-primary"
-                style={{ padding: '9px 18px', fontSize: '13px', fontWeight: 600 }}
-                onClick={handleRunGnnAnalysis}
-                disabled={analyzingGnn}
-              >
-                {analyzingGnn ? '⚡ Running GNN Inference...' : '⚡ Run GNN Bottleneck Analysis'}
-              </button>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {canSimulate ? (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '9px 18px', fontSize: '13px', fontWeight: 600 }}
+                    onClick={handleRunGnnAnalysis}
+                    disabled={analyzingGnn}
+                  >
+                    {analyzingGnn ? '⚡ Running GNN Inference...' : '⚡ Run GNN Bottleneck Analysis'}
+                  </button>
 
-              <button
-                className="btn btn-primary"
-                style={{
-                  padding: '9px 18px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  background: '#059669',
-                  borderColor: '#047857',
-                }}
-                onClick={handleCalculateThisQueryOptimization}
-                disabled={isCalculatingOptimization || loading}
-              >
-                {isCalculatingOptimization ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
-              </button>
+                  <button
+                    className="btn btn-primary"
+                    style={{
+                      padding: '9px 18px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      background: '#059669',
+                      borderColor: '#047857',
+                    }}
+                    onClick={handleCalculateThisQueryOptimization}
+                    disabled={isCalculatingOptimization || loading}
+                  >
+                    {isCalculatingOptimization ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
+                  </button>
 
-              <button
-                className="btn btn-secondary"
-                style={{ padding: '9px 18px', fontSize: '13px', fontWeight: 600 }}
-                onClick={handleRunSqlRewrite}
-                disabled={rewriting}
-              >
-                {rewriting ? '🔄 Analyzing SQL AST...' : '🔄 Rewrite Query (Safe AST)'}
-              </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '9px 18px', fontSize: '13px', fontWeight: 600 }}
+                    onClick={handleRunSqlRewrite}
+                    disabled={rewriting}
+                  >
+                    {rewriting ? '🔄 Analyzing SQL AST...' : '🔄 Rewrite Query (Safe AST)'}
+                  </button>
+                </>
+              ) : (
+                <span className="badge" style={{ background: '#1e293b', color: '#94a3b8' }}>
+                  🔒 Read-Only Telemetry View (ANALYST+ role required to run GNN inference or AST rewrites)
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -837,9 +905,9 @@ export function QueryDetails() {
                   }
                 : null
             }
-            onSimulate={handleSimulate}
-            onApprove={handleApprove}
-            onReject={handleReject}
+            onSimulate={canSimulate ? handleSimulate : undefined}
+            onApprove={canApprove ? handleApprove : undefined}
+            onReject={canApprove ? handleReject : undefined}
             isSimulating={isSimulating}
             isDeciding={isDeciding}
             initialExpanded={true}

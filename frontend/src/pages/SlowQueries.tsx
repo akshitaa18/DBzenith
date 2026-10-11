@@ -12,12 +12,15 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { ProvenanceBadge } from '../components/ProvenanceBadge'
+import { useAuth } from '../context/AuthContext'
 
 function formatMs(value: number) {
   return `${value.toFixed(2)} ms`
 }
 
 export function SlowQueries() {
+  const { canSimulate, canApprove } = useAuth()
   const [queries, setQueries] = useState<QueryDetail[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -57,7 +60,7 @@ export function SlowQueries() {
     setCalculationSuccessMsg(null)
     try {
       const res = await calculateQueryOptimizations()
-      setCalculationSuccessMsg(`✓ Successfully evaluated and computed before/after plan costs and simulated latencies for ${res.calculated_count} queries!`)
+      setCalculationSuccessMsg(`✓ Successfully evaluated and computed hypothetical before/after plan cost estimates for ${res.calculated_count} queries!`)
       fetchQueries()
     } catch (err: any) {
       setError(err?.message || 'Failed to calculate query optimizations.')
@@ -158,11 +161,20 @@ export function SlowQueries() {
   )
 
   const totalPages = Math.ceil(total / pageSize) || 1
+  const firstQuery = queries[0]
 
   return (
     <section>
       <div className="section-head" style={{ marginBottom: '18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+          {firstQuery && (
+            <ProvenanceBadge
+              badge={firstQuery.provenance_badge}
+              state={firstQuery.provenance_state}
+              isSynthetic={firstQuery.is_synthetic}
+              prefix="DATA SOURCE"
+            />
+          )}
           <span className="badge badge-observed">OBSERVED: pg_stat_statements</span>
           <span className="badge sev-high">Telemetry Filter</span>
           <span className="badge badge-ai-analysis">Optimization Trace Enabled</span>
@@ -243,24 +255,26 @@ export function SlowQueries() {
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignSelf: 'flex-end', marginLeft: 'auto' }}>
-          <button
-            className="btn btn-primary"
-            onClick={handleCalculateAllOptimizations}
-            disabled={isCalculatingOptimizations || loading}
-            style={{
-              padding: '8px 16px',
-              height: '36px',
-              background: '#059669',
-              borderColor: '#047857',
-              fontWeight: 600,
-              fontSize: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            {isCalculatingOptimizations ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
-          </button>
+          {canSimulate && (
+            <button
+              className="btn btn-primary"
+              onClick={handleCalculateAllOptimizations}
+              disabled={isCalculatingOptimizations || loading}
+              style={{
+                padding: '8px 16px',
+                height: '36px',
+                background: '#059669',
+                borderColor: '#047857',
+                fontWeight: 600,
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              {isCalculatingOptimizations ? '⚡ Calculating...' : '⚡ Calculate Before/After Cost & Latency'}
+            </button>
+          )}
 
           <button
             className="btn-secondary"
@@ -294,6 +308,7 @@ export function SlowQueries() {
               <thead>
                 <tr>
                   <th>Query ID</th>
+                  <th>Provenance</th>
                   <th>Severity</th>
                   <th>Plan Cost (Before → After)</th>
                   <th>Latency (Before → After)</th>
@@ -314,6 +329,13 @@ export function SlowQueries() {
                       <tr>
                         <td>
                           <strong><code>{q.query_id}</code></strong>
+                        </td>
+                        <td>
+                          <ProvenanceBadge
+                            badge={q.provenance_badge}
+                            state={q.provenance_state}
+                            isSynthetic={q.is_synthetic}
+                          />
                         </td>
                         <td>
                           {isCritical ? (
@@ -340,7 +362,7 @@ export function SlowQueries() {
                                 -{q.optimization_summary.cost_improvement_pct}%
                               </span>
                             </div>
-                          ) : (
+                          ) : canSimulate ? (
                             <button
                               className="secondary-button"
                               style={{ fontSize: '10px', padding: '3px 8px' }}
@@ -349,6 +371,8 @@ export function SlowQueries() {
                             >
                               Calc Cost
                             </button>
+                          ) : (
+                            <span style={{ color: '#64748b', fontSize: '11px' }}>—</span>
                           )}
                         </td>
                         <td>
@@ -363,9 +387,19 @@ export function SlowQueries() {
                                   {formatMs(q.optimization_summary.simulated_latency_ms)}
                                 </strong>
                               </div>
-                              <span className="badge" style={{ background: '#0369a1', color: '#7dd3fc', fontSize: '10px', marginTop: '3px' }}>
-                                {q.optimization_summary.speedup_factor}x faster
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                <ProvenanceBadge
+                                  badge={q.optimization_summary.provenance_badge || (q.optimization_summary.is_measured ? 'SIMULATED' : 'ESTIMATED')}
+                                  state={q.optimization_summary.provenance_state}
+                                  isSynthetic={q.optimization_summary.is_synthetic}
+                                  style={{ fontSize: '9px', padding: '1px 6px' }}
+                                />
+                                <span className="badge" style={{ background: '#0369a1', color: '#7dd3fc', fontSize: '10px' }}>
+                                  {q.optimization_summary.is_measured
+                                    ? `${q.optimization_summary.speedup_factor}x benchmark`
+                                    : `Est. ${q.optimization_summary.speedup_factor}x (unmeasured)`}
+                                </span>
+                              </div>
                             </div>
                           ) : (
                             <strong style={{ color: isCritical ? '#dc2626' : isWarning ? '#d97706' : '#166534' }}>
@@ -409,7 +443,7 @@ export function SlowQueries() {
                       {/* Expandable Inline Optimization Trace */}
                       {isTraceOpen && (
                         <tr>
-                          <td colSpan={8} style={{ background: '#090d16', padding: '16px' }}>
+                          <td colSpan={9} style={{ background: '#090d16', padding: '16px' }}>
                             {loadingTrace ? (
                               <div className="loading-box" style={{ color: '#94a3b8' }}>
                                 Constructing full Optimization Trace for Query #{q.query_id}...
@@ -436,9 +470,9 @@ export function SlowQueries() {
                                       }
                                     : null
                                 }
-                                onSimulate={handleSimulateInTrace}
-                                onApprove={handleApproveInTrace}
-                                onReject={handleRejectInTrace}
+                                onSimulate={canSimulate ? handleSimulateInTrace : undefined}
+                                onApprove={canApprove ? handleApproveInTrace : undefined}
+                                onReject={canApprove ? handleRejectInTrace : undefined}
                                 isSimulating={isSimulating}
                                 isDeciding={isDeciding}
                                 initialExpanded={true}

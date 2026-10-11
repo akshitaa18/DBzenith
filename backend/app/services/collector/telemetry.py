@@ -10,6 +10,12 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.provenance import (
+    ProvenanceState,
+    compute_query_fingerprint,
+    sanitize_collection_error,
+    sanitize_source_identifier,
+)
 from app.db.session import get_session_factory
 from app.models.relation import RelationStatistic
 from app.models.workload import QueryStatistic, WorkloadSnapshot
@@ -44,6 +50,7 @@ class TelemetryCollector:
     def __init__(self) -> None:
         self.settings = get_settings()
         self._last_was_fallback: bool = False
+        self._last_collection_error: str | None = None
 
     def collect_once(self, background: bool = False) -> WorkloadSnapshot:
         started = time.monotonic()
@@ -59,13 +66,31 @@ class TelemetryCollector:
                 )
                 live_total_calls = sum(int(r.get("calls") or 0) for r in rows)
                 if existing is not None and (
-                    self._last_was_fallback or existing.total_calls > live_total_calls
+                    self._last_was_fallback or live_total_calls == 0
                 ):
                     return existing
 
             predicates = self._predicate_stats(db)
             relations = self._relation_stats(db)
             previous = self._previous_snapshot(db)
+            is_synthetic = bool(self._last_was_fallback)
+            prov_state = (
+                ProvenanceState.SYNTHETIC_DEMO.value
+                if is_synthetic
+                else ProvenanceState.LIVE_TELEMETRY.value
+            )
+            source_id = (
+                "synthetic://demo-fallback"
+                if is_synthetic
+                else sanitize_source_identifier(self.settings.database_url)
+            )
+            if self._last_collection_error:
+                coll_status = "error"
+            elif is_synthetic:
+                coll_status = "synthetic_fallback"
+            else:
+                coll_status = "success"
+
             snapshot = WorkloadSnapshot(
                 window_seconds=self._window_seconds(db),
                 total_calls=sum(int(r["calls"] or 0) for r in rows),
@@ -74,6 +99,12 @@ class TelemetryCollector:
                 slow_queries=sum(
                     1 for r in rows if float(r["mean_exec_time"] or 0) >= self.settings.slow_query_threshold_ms
                 ),
+                provenance_state=prov_state,
+                source_identifier=source_id,
+                collection_status=coll_status,
+                collection_error=self._last_collection_error,
+                is_synthetic=is_synthetic,
+                is_measured=not is_synthetic and self._last_collection_error is None,
             )
             db.add(snapshot)
             db.flush()
@@ -96,6 +127,7 @@ class TelemetryCollector:
                         and self._is_safe_explain_candidate(row["query"] or "")):
                     explain_plan = self._explain(db, row["query"] or "")
 
+                norm_q = normalize_query(row["query"] or "")
                 db.add(
                     QueryStatistic(
                         snapshot_id=snapshot.id,
@@ -104,7 +136,7 @@ class TelemetryCollector:
                         user_oid=int(row["userid"] or 0),
                         database_name=row["database_name"],
                         user_name=row["user_name"],
-                        normalized_query=normalize_query(row["query"] or ""),
+                        normalized_query=norm_q,
                         calls=int(row["calls"] or 0),
                         total_exec_time_ms=float(row["total_exec_time"] or 0),
                         mean_exec_time_ms=float(row["mean_exec_time"] or 0),
@@ -124,6 +156,13 @@ class TelemetryCollector:
                         query_frequency_per_minute=frequency,
                         predicate_info=predicates.get(query_id),
                         explain_plan=explain_plan,
+                        provenance_state=prov_state,
+                        source_identifier=source_id,
+                        query_fingerprint=compute_query_fingerprint(norm_q),
+                        captured_at=snapshot.captured_at,
+                        window_seconds=snapshot.window_seconds,
+                        is_synthetic=is_synthetic,
+                        is_measured=not is_synthetic,
                     )
                 )
             self._prune_old_snapshots(db, keep=50)
@@ -135,6 +174,8 @@ class TelemetryCollector:
                     "event": "telemetry_snapshot_collected",
                     "snapshot_id": snapshot.id,
                     "query_count": snapshot.unique_queries,
+                    "provenance_state": snapshot.provenance_state,
+                    "collection_status": snapshot.collection_status,
                     "duration_ms": round((time.monotonic() - started) * 1000, 2),
                 },
             )
@@ -158,98 +199,103 @@ class TelemetryCollector:
             logger.debug("snapshot pruning skipped: %s", exc)
 
     def _query_stats(self, db: Session) -> list[dict]:
-        # Check available columns in pg_stat_statements for compatibility with PG17+ and older versions
-        col_rows = db.execute(
-            text("SELECT column_name FROM information_schema.columns WHERE table_name = 'pg_stat_statements'")
-        ).fetchall()
-        col_names = {r[0] for r in col_rows}
-
-        if "blk_read_time" in col_names:
-            blk_read_expr = "s.blk_read_time"
-            blk_write_expr = "s.blk_write_time"
-        elif "shared_blk_read_time" in col_names:
-            blk_read_expr = "COALESCE(s.shared_blk_read_time + s.local_blk_read_time, 0.0) AS blk_read_time"
-            blk_write_expr = "COALESCE(s.shared_blk_write_time + s.local_blk_write_time, 0.0) AS blk_write_time"
-        else:
-            blk_read_expr = "0.0 AS blk_read_time"
-            blk_write_expr = "0.0 AS blk_write_time"
-
-        query_sql = f"""
-            SELECT
-                s.userid,
-                s.dbid,
-                s.queryid,
-                s.query,
-                s.calls,
-                s.total_exec_time,
-                s.mean_exec_time,
-                s.min_exec_time,
-                s.max_exec_time,
-                s.rows,
-                s.shared_blks_hit,
-                s.shared_blks_read,
-                s.shared_blks_dirtied,
-                s.shared_blks_written,
-                s.local_blks_hit,
-                s.local_blks_read,
-                s.temp_blks_read,
-                s.temp_blks_written,
-                {blk_read_expr},
-                {blk_write_expr},
-                d.datname AS database_name,
-                u.rolname AS user_name
-            FROM pg_stat_statements s
-            LEFT JOIN pg_database d ON d.oid = s.dbid
-            LEFT JOIN pg_roles u ON u.oid = s.userid
-            WHERE s.queryid IS NOT NULL
-              AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-              AND s.query NOT ILIKE '%workload_snapshots%'
-              AND s.query NOT ILIKE '%query_statistics%'
-              AND s.query NOT ILIKE '%relation_statistics%'
-              AND s.query NOT ILIKE '%plan_analyses%'
-              AND s.query NOT ILIKE '%optimization_recommendations%'
-              AND s.query NOT ILIKE '%optimization_simulations%'
-              AND s.query NOT ILIKE '%recommendation_audit_events%'
-              AND s.query NOT ILIKE '%audit_events%'
-              AND s.query NOT ILIKE '%security_users%'
-              AND s.query NOT ILIKE '%system_metadata%'
-              AND s.query NOT ILIKE '%pg_stat_%'
-              AND s.query NOT ILIKE '%pg_qualstats%'
-              AND s.query NOT ILIKE '%pg_indexes%'
-              AND s.query NOT ILIKE '%pg_class%'
-              AND s.query NOT ILIKE '%pg_namespace%'
-              AND s.query NOT ILIKE '%pg_extension%'
-              AND s.query NOT ILIKE '%pg_database%'
-              AND s.query NOT ILIKE '%pg_roles%'
-              AND s.query NOT ILIKE '%pg_tables%'
-              AND s.query NOT ILIKE '%to_regclass%'
-              AND s.query NOT ILIKE '%current_setting%'
-              AND s.query NOT ILIKE '%current_database%'
-              AND s.query NOT ILIKE '%setval(%'
-              AND s.query NOT ILIKE '%hypopg%'
-              AND s.query NOT ILIKE '%information_schema%'
-              AND s.query NOT ILIKE '%alembic_version%'
-              AND s.query NOT ILIKE 'BEGIN%'
-              AND s.query NOT ILIKE 'COMMIT%'
-              AND s.query NOT ILIKE 'ROLLBACK%'
-              AND s.query NOT ILIKE 'SAVEPOINT%'
-              AND s.query NOT ILIKE 'RELEASE%'
-              AND s.query NOT ILIKE 'DEALLOCATE%'
-              AND s.query NOT ILIKE 'SET %'
-              AND s.query NOT ILIKE 'SHOW %'
-              AND s.query NOT ILIKE 'EXPLAIN%'
-            ORDER BY s.total_exec_time DESC
-            LIMIT :limit
-        """
+        self._last_collection_error = None
         try:
             with db.begin_nested():
+                # Check available columns in pg_stat_statements for compatibility with PG17+ and older versions
+                col_rows = db.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'pg_stat_statements'")
+                ).fetchall()
+                col_names = {r[0] for r in col_rows}
+
+                if "blk_read_time" in col_names:
+                    blk_read_expr = "s.blk_read_time"
+                    blk_write_expr = "s.blk_write_time"
+                elif "shared_blk_read_time" in col_names:
+                    blk_read_expr = "COALESCE(s.shared_blk_read_time + s.local_blk_read_time, 0.0) AS blk_read_time"
+                    blk_write_expr = "COALESCE(s.shared_blk_write_time + s.local_blk_write_time, 0.0) AS blk_write_time"
+                else:
+                    blk_read_expr = "0.0 AS blk_read_time"
+                    blk_write_expr = "0.0 AS blk_write_time"
+
+                query_sql = f"""
+                    SELECT
+                        s.userid,
+                        s.dbid,
+                        s.queryid,
+                        s.query,
+                        s.calls,
+                        s.total_exec_time,
+                        s.mean_exec_time,
+                        s.min_exec_time,
+                        s.max_exec_time,
+                        s.rows,
+                        s.shared_blks_hit,
+                        s.shared_blks_read,
+                        s.shared_blks_dirtied,
+                        s.shared_blks_written,
+                        s.local_blks_hit,
+                        s.local_blks_read,
+                        s.temp_blks_read,
+                        s.temp_blks_written,
+                        {blk_read_expr},
+                        {blk_write_expr},
+                        d.datname AS database_name,
+                        u.rolname AS user_name
+                    FROM pg_stat_statements s
+                    LEFT JOIN pg_database d ON d.oid = s.dbid
+                    LEFT JOIN pg_roles u ON u.oid = s.userid
+                    WHERE s.queryid IS NOT NULL
+                      AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+                      AND s.query NOT ILIKE '%workload_snapshots%'
+                      AND s.query NOT ILIKE '%query_statistics%'
+                      AND s.query NOT ILIKE '%relation_statistics%'
+                      AND s.query NOT ILIKE '%plan_analyses%'
+                      AND s.query NOT ILIKE '%optimization_recommendations%'
+                      AND s.query NOT ILIKE '%optimization_simulations%'
+                      AND s.query NOT ILIKE '%recommendation_audit_events%'
+                      AND s.query NOT ILIKE '%audit_events%'
+                      AND s.query NOT ILIKE '%security_users%'
+                      AND s.query NOT ILIKE '%system_metadata%'
+                      AND s.query NOT ILIKE '%pg_stat_%'
+                      AND s.query NOT ILIKE '%pg_qualstats%'
+                      AND s.query NOT ILIKE '%pg_indexes%'
+                      AND s.query NOT ILIKE '%pg_class%'
+                      AND s.query NOT ILIKE '%pg_namespace%'
+                      AND s.query NOT ILIKE '%pg_extension%'
+                      AND s.query NOT ILIKE '%pg_database%'
+                      AND s.query NOT ILIKE '%pg_roles%'
+                      AND s.query NOT ILIKE '%pg_tables%'
+                      AND s.query NOT ILIKE '%to_regclass%'
+                      AND s.query NOT ILIKE '%current_setting%'
+                      AND s.query NOT ILIKE '%current_database%'
+                      AND s.query NOT ILIKE '%setval(%'
+                      AND s.query NOT ILIKE '%hypopg%'
+                      AND s.query NOT ILIKE '%information_schema%'
+                      AND s.query NOT ILIKE '%alembic_version%'
+                      AND s.query NOT ILIKE 'BEGIN%'
+                      AND s.query NOT ILIKE 'COMMIT%'
+                      AND s.query NOT ILIKE 'ROLLBACK%'
+                      AND s.query NOT ILIKE 'SAVEPOINT%'
+                      AND s.query NOT ILIKE 'RELEASE%'
+                      AND s.query NOT ILIKE 'DEALLOCATE%'
+                      AND s.query NOT ILIKE 'SET %'
+                      AND s.query NOT ILIKE 'SHOW %'
+                      AND s.query NOT ILIKE 'EXPLAIN%'
+                    ORDER BY s.total_exec_time DESC
+                    LIMIT :limit
+                """
                 result = db.execute(text(query_sql), {"limit": self.settings.telemetry_query_limit}).mappings().all()
                 rows = [dict(row) for row in result]
-                if rows:
+                if rows or not self.settings.enable_demo_seed:
                     self._last_was_fallback = False
                     return rows
         except Exception as exc:
-            logger.warning("pg_stat_statements query failed: %s", exc)
+            self._last_collection_error = sanitize_collection_error(exc)
+            logger.warning("pg_stat_statements query failed: %s", self._last_collection_error)
+            if not self.settings.enable_demo_seed:
+                self._last_was_fallback = False
+                return []
 
         self._last_was_fallback = True
         return self._fallback_query_stats(db)

@@ -35,7 +35,8 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initial = useMemo(() => getStoredSession(), [])
-  const [user, setUser] = useState<AuthUser | null>(initial.session?.user ?? null)
+  // Never expose unverified localStorage user state before /api/v1/auth/me completes
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [sessionExpired, setSessionExpired] = useState<boolean>(initial.expired)
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(initial.session))
 
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return
     }
     if (!session) {
+      setUser(null)
       setIsLoading(false)
       return
     }
@@ -69,10 +71,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err: any) => {
         if (cancelled) return
-        const msg = String(err?.message || '')
-        if (msg.includes('401')) {
-          clearAuthSession()
-          setUser(null)
+        const msg = String(err?.message || '').toLowerCase()
+        clearAuthSession()
+        setUser(null)
+        if (msg.includes('401') || msg.includes('expired') || msg.includes('token') || msg.includes('credentials')) {
           setSessionExpired(true)
         }
       })

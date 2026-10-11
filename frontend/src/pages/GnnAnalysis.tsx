@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { analyzePlan, getQueryDetail, getRlStatus, optimizeWithRl, PlanAnalysis } from '../lib/api'
+import { analyzePlan, getPlanAnalysis, getQueryDetail, getRlStatus, optimizeWithRl, PlanAnalysis } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { useAuth } from '../context/AuthContext'
 
 const SAMPLE_QUERIES = [
   {
@@ -59,6 +60,7 @@ WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id AND o.a
 ]
 
 export function GnnAnalysisPage() {
+  const { canSimulate } = useAuth()
   const [searchParams] = useSearchParams()
   const [sql, setSql] = useState(SAMPLE_QUERIES[0].sql)
   const [currentQueryId, setCurrentQueryId] = useState<string | null>(null)
@@ -92,6 +94,14 @@ export function GnnAnalysisPage() {
         })
         .catch(() => {})
 
+      if (!canSimulate) {
+        getPlanAnalysis(1)
+          .then((res) => setAnalysis(res))
+          .catch(() => {})
+          .finally(() => setLoading(false))
+        return
+      }
+
       // Directly analyze via query_id
       analyzePlan({ query_id: qid.trim() })
         .then((res) => {
@@ -101,8 +111,12 @@ export function GnnAnalysisPage() {
           setError(err?.message || `Failed to analyze query #${qid}`)
         })
         .finally(() => setLoading(false))
+    } else if (!canSimulate && !analysis) {
+      getPlanAnalysis(1)
+        .then((res) => setAnalysis(res))
+        .catch(() => {})
     }
-  }, [searchParams])
+  }, [searchParams, canSimulate])
 
   const handleRunAnalysis = async (queryToRun?: string) => {
     const rawSql = queryToRun ?? sql
@@ -207,7 +221,9 @@ export function GnnAnalysisPage() {
                 onClick={() => {
                   setCurrentQueryId(null)
                   setSql(sample.sql)
-                  handleRunAnalysis(sample.sql)
+                  if (canSimulate) {
+                    handleRunAnalysis(sample.sql)
+                  }
                 }}
               >
                 {sample.name}
@@ -235,14 +251,20 @@ export function GnnAnalysisPage() {
           placeholder="Enter PostgreSQL SQL query to analyze with GNN..."
         />
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-          <button
-            className="btn btn-primary"
-            onClick={() => handleRunAnalysis()}
-            disabled={loading || !sql.trim()}
-          >
-            {loading ? 'Analyzing Graph...' : 'Analyze with GNN'}
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', alignItems: 'center' }}>
+          {canSimulate ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => handleRunAnalysis()}
+              disabled={loading || !sql.trim()}
+            >
+              {loading ? 'Analyzing Graph...' : 'Analyze with GNN'}
+            </button>
+          ) : (
+            <span className="badge" style={{ background: '#1e293b', color: '#94a3b8' }}>
+              🔒 Read-Only GNN View (ANALYST+ role required to run new GNN plan analysis)
+            </span>
+          )}
         </div>
       </div>
 
@@ -611,32 +633,38 @@ export function GnnAnalysisPage() {
                     Agent formulates discrete optimization actions (Index, Rewrite, Partition, Join) based on GNN plan state representations.
                   </p>
                 </div>
-                <button
-                  className="btn btn-primary"
-                  style={{ fontSize: '13px', padding: '6px 14px' }}
-                  disabled={rlLoading}
-                  onClick={async () => {
-                    setRlLoading(true)
-                    setError(null)
-                    try {
-                      const res = await optimizeWithRl({
-                        workload_metrics: {
-                          total_cost: analysis.features?.total_cost || 100,
-                          node_count: analysis.features?.node_count || 4,
-                          max_depth: analysis.features?.max_depth || 3,
-                          seq_scan_ratio: analysis.features?.seq_scan_fraction ?? 0.4,
-                        },
-                      })
-                      setRlResult(res)
-                    } catch (e: any) {
-                      setError('RL optimization failed: ' + e.message)
-                    } finally {
-                      setRlLoading(false)
-                    }
-                  }}
-                >
-                  {rlLoading ? 'Evaluating RL Policy...' : 'Run RL Policy Action 🚀'}
-                </button>
+                {canSimulate ? (
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: '13px', padding: '6px 14px' }}
+                    disabled={rlLoading}
+                    onClick={async () => {
+                      setRlLoading(true)
+                      setError(null)
+                      try {
+                        const res = await optimizeWithRl({
+                          workload_metrics: {
+                            total_cost: analysis.features?.total_cost || 100,
+                            node_count: analysis.features?.node_count || 4,
+                            max_depth: analysis.features?.max_depth || 3,
+                            seq_scan_ratio: analysis.features?.seq_scan_fraction ?? 0.4,
+                          },
+                        })
+                        setRlResult(res)
+                      } catch (e: any) {
+                        setError('RL optimization failed: ' + e.message)
+                      } finally {
+                        setRlLoading(false)
+                      }
+                    }}
+                  >
+                    {rlLoading ? 'Evaluating RL Policy...' : 'Run RL Policy Action 🚀'}
+                  </button>
+                ) : (
+                  <span className="badge" style={{ background: '#1e293b', color: '#94a3b8' }}>
+                    🔒 ANALYST+ role required to execute RL policy
+                  </span>
+                )}
               </div>
 
               {/* Invariant badge */}

@@ -251,7 +251,7 @@ describe('DBZenith Authentication, Session & RBAC Suite', () => {
     expect(await screen.findByText('admin@dbzenith.local')).toBeInTheDocument()
   })
 
-  it('attaches Bearer token and credentials on authenticated API requests', async () => {
+  it('attaches Bearer token and credentials on authenticated API requests and sanitizes raw stack traces on failure', async () => {
     vi.restoreAllMocks()
     const adminUser: api.AuthUser = {
       id: 1,
@@ -261,7 +261,7 @@ describe('DBZenith Authentication, Session & RBAC Suite', () => {
     }
     api.setAuthSession('jwt-secret-token-xyz', adminUser, 3600)
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify([]), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -274,5 +274,236 @@ describe('DBZenith Authentication, Session & RBAC Suite', () => {
     const [, init] = fetchSpy.mock.calls[0]
     expect(init?.credentials).toBe('include')
     expect((init?.headers as Record<string, string>)['Authorization']).toBe('Bearer jwt-secret-token-xyz')
+
+    // Verify raw stack traces from 500 errors are sanitized and never exposed
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ detail: 'Traceback (most recent call last):\n  File "/app/main.py", line 42, in handler\nsqlalchemy.exc.OperationalError' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    await expect(api.listUsers()).rejects.toThrow(/internal error/i)
+  })
+
+  it('prevents protected pages from flashing sensitive information before /api/v1/auth/me resolves, and clears session if verification fails', async () => {
+    const staleLocalUser: api.AuthUser = {
+      id: 99,
+      username: 'tampered_local_admin',
+      email: 'tampered@dbzenith.local',
+      role: 'ADMIN',
+    }
+    api.setAuthSession('unverified-token', staleLocalUser, 3600)
+
+    let rejectMe!: (err: Error) => void
+    vi.spyOn(api, 'getCurrentUserProfile').mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectMe = reject
+        }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/recommendations']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    // While /api/v1/auth/me is in flight, must show verification spinner and NEVER flash protected data or unverified username
+    expect(screen.getByText(/Verifying operator session/i)).toBeInTheDocument()
+    expect(screen.queryByText('tampered_local_admin')).not.toBeInTheDocument()
+    expect(screen.queryByText(/CREATE INDEX CONCURRENTLY ON orders/i)).not.toBeInTheDocument()
+
+    // Now simulate /api/v1/auth/me failing (e.g., 401 or unreachable backend)
+    rejectMe(new Error('API request failed: 401: Invalid or expired authentication token'))
+
+    // Must clear localStorage session and redirect to /login with Session Expired notice
+    expect(await screen.findByRole('heading', { name: /Operator Sign In/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/Session Expired/i)
+    expect(window.localStorage.getItem('dbzenith_auth_session_v1')).toBeNull()
+  })
+
+  it('clears local authentication state on manual Sign Out button click', async () => {
+    const dbaUser: api.AuthUser = {
+      id: 2,
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+    }
+    api.setAuthSession('active-token', dbaUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '2',
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+    const logoutSpy = vi.spyOn(api, 'logoutUser').mockImplementation(async () => {
+      api.clearAuthSession()
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('authenticated-identity')).toHaveTextContent('dba_operator')
+    fireEvent.click(screen.getByRole('button', { name: /Sign Out/i }))
+
+    expect(await screen.findByRole('heading', { name: /Operator Sign In/i })).toBeInTheDocument()
+    expect(logoutSpy).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.getItem('dbzenith_auth_session_v1')).toBeNull()
+  })
+
+  it('preserves existing SlowQueries, PlanViewer, and ApprovalCenter workflows with role-aware controls', async () => {
+    const dbaUser: api.AuthUser = {
+      id: 2,
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+    }
+    api.setAuthSession('dba-token', dbaUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '2',
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+    vi.spyOn(api, 'getSlowQueries').mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          query_id: 1001,
+          database_name: 'dbzenith',
+          user_name: 'postgres',
+          normalized_query: 'SELECT * FROM orders WHERE order_date >= $1',
+          calls: 500,
+          total_exec_time_ms: 105000,
+          mean_exec_time_ms: 210,
+          min_exec_time_ms: 40,
+          max_exec_time_ms: 890,
+          rows: 5000,
+          shared_blks_hit: 1200,
+          shared_blks_read: 800,
+          shared_blks_dirtied: 0,
+          shared_blks_written: 0,
+          local_blks_hit: 0,
+          local_blks_read: 0,
+          temp_blks_read: 0,
+          temp_blks_written: 0,
+          blk_read_time_ms: 45,
+          blk_write_time_ms: 0,
+          query_frequency_per_minute: 12.5,
+          predicate_info: null,
+          explain_plan: null,
+        },
+      ],
+      page: 1,
+      page_size: 10,
+      total: 1,
+    })
+    vi.spyOn(api, 'getRecommendationAuditEvents').mockResolvedValue([])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const approveSpy = vi.spyOn(api, 'approveRecommendation').mockResolvedValue({
+      ...mockPendingRec,
+      status: 'approved',
+    })
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/slow-queries']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/SELECT \* FROM orders WHERE order_date >= \$1/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Calculate Before\/After Cost & Latency/i })).toBeInTheDocument()
+    unmount()
+
+    render(
+      <MemoryRouter initialEntries={['/approvals']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/CREATE INDEX CONCURRENTLY ON orders/i)).toBeInTheDocument()
+    const approveBtn = await screen.findByRole('button', { name: /Approve Migration/i })
+    fireEvent.click(approveBtn)
+    await waitFor(() => {
+      expect(approveSpy).toHaveBeenCalledWith(101, expect.any(String))
+    })
+  })
+
+  it('displays DEMO banner for synthetic data, LIVE/HISTORICAL badges, missing timestamp notices, and ESTIMATED explanations', async () => {
+    const dbaUser: api.AuthUser = {
+      id: 2,
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+    }
+    api.setAuthSession('dba-token', dbaUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '2',
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+
+    // 1. Synthetic Demo Mode
+    vi.spyOn(api, 'getWorkloadSummary').mockResolvedValueOnce({
+      ...mockSummary,
+      provenance_state: 'SYNTHETIC_DEMO',
+      provenance_badge: 'DEMO',
+      source_identifier: 'synthetic://demo-workload-generator',
+      collection_status: 'synthetic_seed',
+      is_synthetic: true,
+      is_measured: false,
+      demo_mode_active: true,
+    })
+
+    const { unmount: unmountDemo } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('demo-provenance-banner')).toHaveTextContent(/Synthetic Demo Workload Active/i)
+    expect(screen.getAllByTestId('provenance-badge-demo').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('estimate-vs-measured-notice')[0]).toHaveTextContent(
+      /not a measured runtime benchmark/i,
+    )
+    unmountDemo()
+
+    // 2. Missing collection timestamp + Stale warning + Collection Error
+    vi.spyOn(api, 'getWorkloadSummary').mockResolvedValueOnce({
+      ...mockSummary,
+      captured_at: null,
+      provenance_state: 'HISTORICAL_OBSERVATION',
+      provenance_badge: 'HISTORICAL',
+      source_identifier: 'postgresql://prod-db:5432/dbzenith',
+      collection_status: 'error',
+      collection_error: 'pg_stat_statements extension is not loaded',
+      is_synthetic: false,
+      is_measured: false,
+      is_stale: true,
+      staleness_warning: 'Collection timestamp is missing; displaying as historical observation.',
+      demo_mode_active: false,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('staleness-warning-banner')).toHaveTextContent(/Collection timestamp is missing/i)
+    expect(screen.getByTestId('telemetry-captured-at')).toHaveTextContent(/Timestamp unavailable \(not current\)/i)
+    expect(screen.getByTestId('collection-error-banner')).toHaveTextContent(/pg_stat_statements extension is not loaded/i)
+    expect(screen.getAllByTestId('provenance-badge-historical').length).toBeGreaterThan(0)
   })
 })

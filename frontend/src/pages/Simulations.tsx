@@ -9,6 +9,11 @@ import {
 } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import {
+  EstimateVsMeasuredNotice,
+  ProvenanceBadge,
+  formatCollectionTimestamp,
+} from '../components/ProvenanceBadge'
 import { useAuth } from '../context/AuthContext'
 
 export function SimulationsPage() {
@@ -418,9 +423,17 @@ export function SimulationsPage() {
                       <span style={{ fontWeight: 800, color: isSelected ? '#38bdf8' : '#f8fafc', fontSize: '0.92rem' }}>
                         Simulation #{sim.id}
                       </span>
-                      <span className={`badge ${sim.status === 'completed' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '10px' }}>
-                        {sim.status.toUpperCase()}
-                      </span>
+                      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                        <ProvenanceBadge
+                          badge={sim.provenance_badge || (sim.is_measured ? 'SIMULATED' : 'ESTIMATED')}
+                          state={sim.provenance_state}
+                          isSynthetic={sim.is_synthetic}
+                          style={{ fontSize: '9px', padding: '1px 6px' }}
+                        />
+                        <span className={`badge ${sim.status === 'completed' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '10px' }}>
+                          {sim.status.toUpperCase()}
+                        </span>
+                      </div>
                     </div>
 
                     <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
@@ -429,7 +442,7 @@ export function SimulationsPage() {
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
                       <span className="speedup-pill">
-                        ⚡ {speedup}x speedup
+                        ⚡ {sim.is_measured ? `${speedup}x benchmark` : `Est. ${speedup}x`}
                       </span>
                       {imprPct !== null && (
                         <span
@@ -455,17 +468,22 @@ export function SimulationsPage() {
               {/* Header Info */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800, color: '#f8fafc' }}>
                       Simulation #{selectedSim.id} Details
                     </h2>
+                    <ProvenanceBadge
+                      badge={selectedSim.provenance_badge || (selectedSim.is_measured ? 'SIMULATED' : 'ESTIMATED')}
+                      state={selectedSim.provenance_state}
+                      isSynthetic={selectedSim.is_synthetic}
+                    />
                     <span className={`badge ${selectedSim.status === 'completed' ? 'badge-success' : 'badge-danger'}`}>
                       {selectedSim.status.toUpperCase()}
                     </span>
                     <span className="badge badge-simulation">HYPOPG VALIDATED</span>
                   </div>
                   <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '4px' }}>
-                    Linked Recommendation: <strong>#{selectedSim.recommendation_id ?? 'Direct'}</strong> • Created: {new Date(selectedSim.created_at).toLocaleString()}
+                    Linked Recommendation: <strong>#{selectedSim.recommendation_id ?? 'Direct'}</strong> • Source: <code>{selectedSim.source_identifier || 'dbzenith'}</code> • Created: {formatCollectionTimestamp(selectedSim.created_at)}
                   </div>
                 </div>
 
@@ -495,6 +513,15 @@ export function SimulationsPage() {
                 </div>
               </div>
 
+              <EstimateVsMeasuredNotice
+                isMeasured={selectedSim.is_measured}
+                isSynthetic={selectedSim.is_synthetic}
+                isVerifiedSpeedup={selectedSim.is_verified_speedup}
+                explanation={selectedSim.estimate_vs_measured_explanation}
+                simulationMethod={selectedSim.simulation_method}
+                modelVersion={selectedSim.model_version}
+              />
+
               {/* 4 Core KPI Comparison Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                 <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
@@ -519,15 +546,15 @@ export function SimulationsPage() {
 
                 <div style={{ background: '#070c18', padding: '14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                   <div style={{ fontSize: '0.72rem', color: '#34d399', textTransform: 'uppercase', fontWeight: 700 }}>
-                    Speedup Factor
+                    {selectedSim.is_measured ? 'Measured Speedup Factor' : 'Estimated Cost Factor (Unmeasured)'}
                   </div>
                   <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#34d399', marginTop: '4px' }}>
-                    ⚡ {getSpeedupFactor(selectedSim)}x Faster
+                    ⚡ {selectedSim.is_measured ? `${getSpeedupFactor(selectedSim)}x Benchmark` : `Est. ${getSpeedupFactor(selectedSim)}x`}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    {getSimulatedLatencyMs(selectedSim) != null
+                    {selectedSim.is_measured && getSimulatedLatencyMs(selectedSim) != null
                       ? `${getSimulatedLatencyMs(selectedSim)}ms vs ${getBaselineLatencyMs(selectedSim) ?? '—'}ms`
-                      : 'Empirical latency projection'}
+                      : 'Planner cost projection — not a measured benchmark'}
                   </div>
                 </div>
 

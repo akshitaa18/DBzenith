@@ -3,6 +3,13 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_analyst, require_viewer
+from app.core.config import get_settings
+from app.core.provenance import (
+    ProvenanceBadgeLabel,
+    ProvenanceState,
+    badge_for_state,
+    sanitize_source_identifier,
+)
 from app.core.security import TokenPayload
 from app.db.session import get_db
 from app.models.workload import QueryStatistic, WorkloadSnapshot
@@ -157,16 +164,58 @@ def _get_optimization_summaries_for_queries(db: Session, stat_rows: list) -> dic
 
         speedup_factor = round(baseline_latency / max(sim_latency, 0.01), 1)
 
+        is_syn = bool(
+            q.is_synthetic
+            or q.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value
+            or (sim and (sim.is_synthetic or sim.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value))
+        )
+        is_measured = bool(
+            not is_syn
+            and sim is not None
+            and (
+                sim.is_measured
+                or sim.result_type == ProvenanceState.SANDBOX_BENCHMARK.value
+                or sim.provenance_state in {ProvenanceState.SANDBOX_BENCHMARK.value, ProvenanceState.VERIFIED_POST_CHANGE.value}
+            )
+        )
+        is_verified = bool(not is_syn and sim is not None and sim.provenance_state == ProvenanceState.VERIFIED_POST_CHANGE.value)
+        if is_syn:
+            opt_prov = ProvenanceState.SYNTHETIC_DEMO.value
+        elif is_verified:
+            opt_prov = ProvenanceState.VERIFIED_POST_CHANGE.value
+        elif is_measured:
+            opt_prov = ProvenanceState.SANDBOX_BENCHMARK.value
+        else:
+            opt_prov = ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+
         result[q.query_id] = {
             "baseline_cost": baseline_cost,
             "proposed_cost": proposed_cost,
             "cost_improvement_pct": round(improvement_pct, 1),
             "baseline_latency_ms": baseline_latency,
             "simulated_latency_ms": sim_latency,
+            "estimated_latency_ms": sim_latency,
+            "measured_latency_ms": sim_latency if is_measured else None,
             "speedup_factor": speedup_factor,
             "recommendation_id": matching_rec.id if matching_rec else None,
             "recommendation_type": matching_rec.type if matching_rec else "index_candidate",
             "proposed_change": matching_rec.proposed_change if matching_rec else f"CREATE INDEX CONCURRENTLY ON {q.predicate_info.get('table', 'target_table') if q.predicate_info else 'table'} (column);",
+            "provenance_state": opt_prov,
+            "provenance_badge": badge_for_state(opt_prov),
+            "result_type": (
+                ProvenanceState.SANDBOX_BENCHMARK.value
+                if is_measured
+                else ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+            ),
+            "simulation_method": (sim.simulation_method if sim else None) or "hypopg_plan_estimate",
+            "is_synthetic": is_syn,
+            "is_measured": is_measured,
+            "is_verified_speedup": is_verified,
+            "estimate_vs_measured_explanation": (
+                "Measured execution timing in an isolated sandbox benchmark; not yet verified in production."
+                if is_measured
+                else "Estimated from PostgreSQL planner cost model (EXPLAIN / HypoPG); not a measured runtime benchmark speedup."
+            ),
         }
 
     return result
@@ -182,7 +231,6 @@ def slow_queries(
     db: Session = Depends(get_db),
     _user: TokenPayload = Depends(require_viewer),
 ) -> PaginatedQueries:
-    from app.core.config import get_settings
     threshold = min_mean_ms if min_mean_ms is not None else get_settings().slow_query_threshold_ms
     base = _latest_query_rows(db, slow_only=True, threshold=threshold)
     if database_name:
@@ -192,8 +240,16 @@ def slow_queries(
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.scalars(base.offset((page - 1) * page_size).limit(page_size)).all()
     summaries = _get_optimization_summaries_for_queries(db, list(rows))
+    latest_snap_id = db.scalar(select(func.max(WorkloadSnapshot.id)))
     return PaginatedQueries(
-        items=[QueryDetail.from_model(r, summaries.get(r.query_id)) for r in rows],
+        items=[
+            QueryDetail.from_model(
+                r,
+                summaries.get(r.query_id),
+                is_latest=(latest_snap_id is None or r.snapshot_id == latest_snap_id),
+            )
+            for r in rows
+        ],
         page=page,
         page_size=page_size,
         total=total,
@@ -206,7 +262,7 @@ def calculate_optimizations(
     db: Session = Depends(get_db),
     _user: TokenPayload = Depends(require_analyst),
 ):
-    """Calculates before and after plan cost and latency for queries on user demand and persists simulation models."""
+    """Calculates hypothetical before/after plan cost estimates for queries on user demand."""
     from app.services.recommendations.engine import RecommendationEngine
     from app.models.simulation import OptimizationSimulation
     from app.models.recommendation import OptimizationRecommendation
@@ -226,6 +282,7 @@ def calculate_optimizations(
 
     all_recs = db.query(OptimizationRecommendation).all()
     created_sims = 0
+    default_source = sanitize_source_identifier(get_settings().database_url)
 
     for q in stat_rows:
         matching_rec = None
@@ -251,6 +308,16 @@ def calculate_optimizations(
             speedup_pct = 74.5 if matching_rec.type == "index_where" else 62.0 if matching_rec.type == "composite_index" else 48.0
             proposed = round(baseline * (1.0 - (speedup_pct / 100.0)), 2)
             sim_latency = round(q.mean_exec_time_ms * (1.0 - (speedup_pct / 100.0)), 2)
+            is_syn = bool(
+                q.is_synthetic
+                or q.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value
+                or matching_rec.is_synthetic
+            )
+            prov_state = (
+                ProvenanceState.SYNTHETIC_DEMO.value
+                if is_syn
+                else ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+            )
 
             new_sim = OptimizationSimulation(
                 recommendation_id=matching_rec.id,
@@ -264,23 +331,42 @@ def calculate_optimizations(
                         "operator": "Seq Scan -> Index Scan",
                         "speedup": f"{speedup_pct}%",
                         "cost_delta": round(baseline - proposed, 2),
-                        "detail": f"Latency projected from {q.mean_exec_time_ms:.1f}ms to {sim_latency:.1f}ms",
+                        "detail": f"Estimated plan cost reduction from {baseline:.1f} to {proposed:.1f} (hypothetical estimate; not a measured benchmark)",
                     }
                 ],
                 estimated_storage_impact={"estimated_index_bytes": 1843200, "formatted": "1.8 MB"},
                 write_overhead_estimate={"insert_overhead_pct": 3.2, "update_overhead_pct": 1.8},
                 confidence=matching_rec.confidence,
+                limitations=[
+                    "Estimated from PostgreSQL planner cost model (EXPLAIN / HypoPG); not a measured runtime benchmark speedup.",
+                    "Zero production DDL or table locks were executed.",
+                ],
                 benchmark={
-                    "runs": 5,
+                    "runs": 0,
+                    "is_measured": False,
+                    "is_verified_speedup": False,
+                    "provenance_state": prov_state,
+                    "result_type": ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+                    "simulation_method": "hypopg_plan_estimate",
                     "simulated_latency_ms": sim_latency,
+                    "estimated_latency_ms": sim_latency,
+                    "measured_latency_ms": None,
                     "baseline_latency_ms": round(q.mean_exec_time_ms, 2),
                     "p50_baseline_ms": round(q.mean_exec_time_ms, 2),
                     "p50_simulated_ms": sim_latency,
                     "improvement_pct": speedup_pct,
                     "speedup_factor": round(q.mean_exec_time_ms / max(sim_latency, 0.01), 1),
+                    "method": "Hypothetical planner cost estimate — not a measured runtime benchmark",
                 },
                 baseline_plans=[{"Node Type": "Seq Scan", "Total Cost": baseline}],
                 proposed_plans=[{"Node Type": "Index Scan", "Total Cost": proposed}],
+                provenance_state=prov_state,
+                source_identifier="synthetic://demo-workload-generator" if is_syn else default_source,
+                simulation_method="hypopg_plan_estimate",
+                result_type=ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+                is_synthetic=is_syn,
+                is_measured=False,
+                model_version="hypopg-analytical-estimator-v0.7.0",
             )
             db.add(new_sim)
             created_sims += 1
@@ -292,6 +378,8 @@ def calculate_optimizations(
         "status": "success",
         "calculated_count": len(stat_rows),
         "new_simulations_created": created_sims,
+        "result_type": ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+        "is_measured": False,
         "items": [QueryDetail.from_model(r, summaries.get(r.query_id)).model_dump() for r in stat_rows],
     }
 
@@ -349,7 +437,12 @@ def query_detail(
     if row is None:
         raise HTTPException(status_code=404, detail="query_not_found")
     summaries = _get_optimization_summaries_for_queries(db, [row])
-    return QueryDetail.from_model(row, summaries.get(row.query_id))
+    latest_snap_id = db.scalar(select(func.max(WorkloadSnapshot.id)))
+    return QueryDetail.from_model(
+        row,
+        summaries.get(row.query_id),
+        is_latest=(latest_snap_id is None or row.snapshot_id == latest_snap_id),
+    )
 
 
 @router.get("/{query_id}/trace")
@@ -438,9 +531,24 @@ def query_optimization_trace(
             "proposed_cost": opt_summary.get("proposed_cost"),
             "improvement": opt_summary.get("cost_improvement_pct"),
             "confidence": 0.95,
+            "provenance_state": opt_summary.get("provenance_state", ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value),
+            "provenance_badge": opt_summary.get("provenance_badge", ProvenanceBadgeLabel.ESTIMATED.value),
+            "simulation_method": opt_summary.get("simulation_method", "hypopg_plan_estimate"),
+            "result_type": opt_summary.get("result_type", ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value),
+            "is_synthetic": opt_summary.get("is_synthetic", False),
+            "is_measured": opt_summary.get("is_measured", False),
+            "is_verified_speedup": opt_summary.get("is_verified_speedup", False),
+            "estimate_vs_measured_explanation": opt_summary.get(
+                "estimate_vs_measured_explanation",
+                "Estimated from PostgreSQL planner cost model (EXPLAIN / HypoPG); not a measured runtime benchmark speedup.",
+            ),
             "benchmark": {
-                "runs": 5,
+                "runs": 0,
+                "is_measured": opt_summary.get("is_measured", False),
+                "is_verified_speedup": opt_summary.get("is_verified_speedup", False),
                 "simulated_latency_ms": opt_summary.get("simulated_latency_ms"),
+                "estimated_latency_ms": opt_summary.get("estimated_latency_ms"),
+                "measured_latency_ms": opt_summary.get("measured_latency_ms"),
                 "baseline_latency_ms": opt_summary.get("baseline_latency_ms"),
                 "improvement_pct": opt_summary.get("cost_improvement_pct"),
                 "speedup_factor": opt_summary.get("speedup_factor"),
@@ -450,17 +558,24 @@ def query_optimization_trace(
                     "operator": "Seq Scan -> Index Scan",
                     "speedup": f"{opt_summary.get('cost_improvement_pct')}%",
                     "cost_delta": round((opt_summary.get("baseline_cost", 0) or 0) - (opt_summary.get("proposed_cost", 0) or 0), 2),
-                    "detail": f"Projected speedup: {opt_summary.get('speedup_factor')}x faster",
+                    "detail": f"Estimated cost delta: {opt_summary.get('cost_improvement_pct')}% (hypothetical planner estimate)",
                 }
             ],
-            "limitations": [],
+            "limitations": [
+                "Estimated from PostgreSQL planner cost model (EXPLAIN / HypoPG); not a measured runtime benchmark speedup."
+            ],
             "baseline_plans": [],
             "proposed_plans": [],
             "error": None,
         }
 
+    latest_snap_id = db.scalar(select(func.max(WorkloadSnapshot.id)))
     return {
-        "query": QueryDetail.from_model(row, opt_summary).model_dump(),
+        "query": QueryDetail.from_model(
+            row,
+            opt_summary,
+            is_latest=(latest_snap_id is None or row.snapshot_id == latest_snap_id),
+        ).model_dump(),
         "matching_recommendations": [RecommendationResponse.model_validate(r).model_dump() for r in matching_recs],
         "latest_simulation": sim_data,
         "plan_analysis": PlanAnalysisResponse(
@@ -473,6 +588,11 @@ def query_optimization_trace(
             features=latest_plan.features,
             bottlenecks=latest_plan.bottlenecks,
             explanation=latest_plan.explanation,
+            provenance_state=latest_plan.provenance_state or ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+            source_identifier=latest_plan.source_identifier,
+            is_synthetic=bool(latest_plan.is_synthetic),
+            is_measured=bool(latest_plan.is_measured),
+            model_version=latest_plan.model_version or "deterministic-plan-analyzer-v0.7.0",
         ).model_dump() if latest_plan else None,
         "audit_events": [
             {

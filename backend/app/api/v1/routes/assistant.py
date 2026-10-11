@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -17,9 +17,11 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 
 class AssistantChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(..., description="User query or instruction to the DBA assistant.")
     session_id: str | None = Field(default=None, description="Optional conversation session ID.")
-    role: str = Field(default="dba", description="User role: 'dba', 'analyst', or 'viewer'.")
+    role: str = Field(default="dba", description="Deprecated client hint; ignored in favor of verified token role.")
 
 
 class AssistantChatResponse(BaseModel):

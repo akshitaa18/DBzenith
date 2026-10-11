@@ -1288,3 +1288,222 @@ def test_privacy_gateway_scrubs_secrets_and_connection_strings():
     ]
     for q in sensitive_queries:
         assert policy._contains_secret(q) is True
+
+
+def test_every_registered_api_route_rejects_anonymous_unless_intentionally_public(client: TestClient):
+    """Introspects all registered FastAPI OpenAPI paths and verifies zero unauthenticated endpoints exist."""
+    import re
+
+    openapi_res = client.get("/openapi.json")
+    assert openapi_res.status_code == 200
+    paths = openapi_res.json().get("paths", {})
+
+    checked = 0
+    for path, methods_dict in paths.items():
+        if not path.startswith("/api/v1"):
+            continue
+        concrete_path = re.sub(r"\{[^}]+\}", "1", path)
+        for method_lower in methods_dict.keys():
+            method = method_lower.upper()
+            if method in {"HEAD", "OPTIONS"}:
+                continue
+            if (method, path) in INTENTIONALLY_PUBLIC_ROUTES:
+                continue
+            res = client.request(method, concrete_path)
+            assert res.status_code == 401, (
+                f"Registered route {method} {path} did not reject anonymous request with 401 (got {res.status_code})"
+            )
+            checked += 1
+    assert checked >= 20
+
+
+def test_forbidden_access_records_security_violation_audit_event(
+    client: TestClient,
+    sec_db: Session,
+    role_tokens: dict[str, str | None],
+):
+    """Verifies that 403 Forbidden responses record immutable SECURITY_VIOLATION audit events."""
+    viewer_headers = _headers_for(role_tokens["VIEWER"])
+    analyst_headers = _headers_for(role_tokens["ANALYST"])
+
+    # 1. VIEWER attempting simulation -> 403
+    r1 = client.post("/api/v1/simulations", headers=viewer_headers, json={"recommendation_id": 101})
+    assert r1.status_code == 403
+
+    # 2. ANALYST attempting recommendation approval -> 403
+    r2 = client.post(
+        "/api/v1/recommendations/101/approve",
+        headers=analyst_headers,
+        json={"reason": "Unauthorized approval attempt"},
+    )
+    assert r2.status_code == 403
+
+    # 3. ANALYST attempting user administration -> 403
+    r3 = client.get("/api/v1/auth/users", headers=analyst_headers)
+    assert r3.status_code == 403
+
+    violations = (
+        sec_db.query(SecurityAuditEvent)
+        .filter_by(event_category="SECURITY_VIOLATION", action="unauthorized_role_access", status="FAILURE")
+        .all()
+    )
+    assert len(violations) >= 3
+    recorded_targets = {v.target_id for v in violations}
+    assert "POST /api/v1/simulations" in recorded_targets
+    assert "POST /api/v1/recommendations/101/approve" in recorded_targets
+    assert "GET /api/v1/auth/users" in recorded_targets
+
+
+def test_live_db_role_demotion_and_deactivated_user_token_revocation(
+    client: TestClient,
+    sec_db: Session,
+    role_tokens: dict[str, str | None],
+):
+    """Verifies that role demotion or user deactivation in DB immediately restricts previously issued tokens."""
+    dba_headers = _headers_for(role_tokens["DBA"])
+    admin_headers = _headers_for(role_tokens["ADMIN"])
+
+    # 1. Admin demotes dba_user (id=3) from DBA to VIEWER while dba_user still holds a DBA token
+    demote_res = client.patch(
+        "/api/v1/auth/users/3",
+        headers=admin_headers,
+        json={"role": "VIEWER"},
+    )
+    assert demote_res.status_code == 200
+    assert demote_res.json()["role"] == "VIEWER"
+
+    # 2. dba_user's existing DBA token now resolves to VIEWER and is forbidden from approving or simulating
+    assert client.get("/api/v1/auth/me", headers=dba_headers).json()["role"] == "VIEWER"
+    assert (
+        client.post(
+            "/api/v1/recommendations/101/approve",
+            headers=dba_headers,
+            json={"reason": "Attempt with stale DBA token after demotion"},
+        ).status_code
+        == 403
+    )
+    assert client.post("/api/v1/simulations", headers=dba_headers, json={"recommendation_id": 101}).status_code == 403
+
+    # 3. Admin deactivates dba_user (id=3) -> existing token is immediately rejected with 401
+    deact_res = client.patch(
+        "/api/v1/auth/users/3",
+        headers=admin_headers,
+        json={"is_active": False},
+    )
+    assert deact_res.status_code == 200
+    assert client.get("/api/v1/auth/me", headers=dba_headers).status_code == 401
+
+    # 4. Tampered session cookie is rejected with 401
+    client.cookies.set("dbzenith_session", "tampered.cookie.value")
+    assert client.get("/api/v1/auth/me").status_code == 401
+    client.cookies.clear()
+
+
+def test_comprehensive_audit_ledger_records_success_and_failure_without_secrets(
+    client: TestClient,
+    sec_db: Session,
+    role_tokens: dict[str, str | None],
+):
+    """Verifies that successful and failed security-sensitive actions are audited without leaking secrets."""
+    dba_headers = _headers_for(role_tokens["DBA"])
+    admin_headers = _headers_for(role_tokens["ADMIN"])
+    viewer_headers = _headers_for(role_tokens["VIEWER"])
+
+    secret_attempt = "PlaintextSecretAttempt_DoNotLog_888!"
+
+    # 1. Failed login -> AUTH / login_failure / FAILURE
+    assert client.post("/api/v1/auth/login", json={"username": "dba_user", "password": secret_attempt}).status_code == 401
+
+    # 2. Successful login -> AUTH / login_success / SUCCESS
+    assert client.post("/api/v1/auth/login", json={"username": "dba_user", "password": "DbaPass123!"}).status_code == 200
+    client.cookies.clear()
+
+    # 3. Forbidden action -> SECURITY_VIOLATION / unauthorized_role_access / FAILURE
+    assert client.post("/api/v1/recommendations/101/approve", headers=viewer_headers, json={"reason": "nope"}).status_code == 403
+
+    # 4. Successful approval & rejection -> APPROVAL & REJECTION / SUCCESS
+    assert client.post("/api/v1/recommendations/101/approve", headers=dba_headers, json={"reason": "Approved"}).status_code == 200
+    assert client.post("/api/v1/recommendations/102/reject", headers=dba_headers, json={"reason": "Rejected"}).status_code == 200
+
+    # 5. Query audit ledger via API and verify entries & secret scrubbing
+    audit_res = client.get("/api/v1/audit?limit=100", headers=admin_headers)
+    assert audit_res.status_code == 200
+    events = audit_res.json()
+    actions_statuses = {(e["event_category"], e["action"], e["status"]) for e in events}
+
+    assert ("AUTH", "login_failure", "FAILURE") in actions_statuses
+    assert ("AUTH", "login_success", "SUCCESS") in actions_statuses
+    assert ("SECURITY_VIOLATION", "unauthorized_role_access", "FAILURE") in actions_statuses
+    assert ("APPROVAL", "recommendation_approved", "SUCCESS") in actions_statuses
+    assert ("REJECTION", "recommendation_rejected", "SUCCESS") in actions_statuses
+
+    raw_audit_payload = audit_res.text
+    assert secret_attempt not in raw_audit_payload
+    assert "DbaPass123!" not in raw_audit_payload
+    assert "password_hash" not in raw_audit_payload
+
+
+def test_end_to_end_feature_workflows_no_regression(
+    client: TestClient,
+    role_tokens: dict[str, str | None],
+):
+    """Verifies existing query analysis, recommendations, sandbox simulations, rewriter, RL, and dashboards."""
+    dba_headers = _headers_for(role_tokens["DBA"])
+
+    # 1. Dashboard summary & snapshots
+    summary = client.get("/api/v1/workload/summary", headers=dba_headers)
+    assert summary.status_code == 200
+    assert summary.json()["total_calls"] == 1500
+
+    snapshots = client.get("/api/v1/workload/snapshots", headers=dba_headers)
+    assert snapshots.status_code == 200
+    assert len(snapshots.json()) == 1
+
+    # 2. Slow queries, query detail, optimization calculation & trace
+    calc = client.post("/api/v1/queries/calculate-optimizations", headers=dba_headers)
+    assert calc.status_code == 200
+    assert calc.json()["calculated_count"] >= 1
+
+    q_detail = client.get("/api/v1/queries/1001", headers=dba_headers)
+    assert q_detail.status_code == 200
+    assert q_detail.json()["optimization_summary"] is not None
+
+    q_trace = client.get("/api/v1/queries/1001/trace", headers=dba_headers)
+    assert q_trace.status_code == 200
+    assert q_trace.json()["query"]["query_id"] == 1001
+
+    # 3. Plan analysis & GNN bottleneck classification
+    plan_an = client.post(
+        "/api/v1/plans/analyze",
+        headers=dba_headers,
+        json={"sql": "SELECT order_id, status FROM orders WHERE status = 'pending' ORDER BY created_at DESC"},
+    )
+    assert plan_an.status_code == 200
+    assert "graph" in plan_an.json()
+    assert "bottlenecks" in plan_an.json()
+
+    # 4. SQL AST Rewriter
+    rw = client.post(
+        "/api/v1/rewriter/rewrite",
+        headers=dba_headers,
+        json={"sql": "SELECT DISTINCT id FROM orders WHERE status = 'a' OR status = 'b'", "validate_sandbox": False},
+    )
+    assert rw.status_code == 200
+    assert "rewritten_query" in rw.json()
+
+    # 5. RL Policy Status & Optimization
+    rl_status = client.get("/api/v1/rl/status", headers=dba_headers)
+    assert rl_status.status_code == 200
+    rl_opt = client.post("/api/v1/rl/optimize", headers=dba_headers, json={"workload_metrics": {"total_cost": 420.0}})
+    assert rl_opt.status_code == 200
+    assert "action_type" in rl_opt.json()
+
+    # 6. Sandbox simulation & Recommendation trace
+    sim = client.post("/api/v1/simulations", headers=dba_headers, json={"recommendation_id": 101, "benchmark_runs": 2})
+    assert sim.status_code == 200
+    assert sim.json()["recommendation_id"] == 101
+
+    rec_trace = client.get("/api/v1/recommendations/101/trace", headers=dba_headers)
+    assert rec_trace.status_code == 200
+    assert rec_trace.json()["recommendation"]["id"] == 101
+

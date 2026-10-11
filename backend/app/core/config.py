@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     sandbox_database_url: str = "postgresql+psycopg://dbzenith_sandbox:change_me_sandbox_only@localhost:5433/dbzenith_sandbox"
     slow_query_threshold_ms: float = 100.0
     telemetry_interval_seconds: int = 30
+    telemetry_staleness_seconds: int = Field(
+        default=300,
+        validation_alias=AliasChoices("TELEMETRY_STALENESS_SECONDS", "DBZENITH_TELEMETRY_STALENESS_SECONDS"),
+    )
+    enable_demo_seed: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ENABLE_DEMO_SEED", "DBZENITH_ENABLE_DEMO_SEED"),
+    )
     telemetry_query_limit: int = 500
     telemetry_relation_limit: int = 100
     collect_explain: bool = True
@@ -35,10 +43,20 @@ class Settings(BaseSettings):
     simulation_max_rows_per_table: int = 25_000
     simulation_max_timeout_ms: int = 30_000
     simulation_max_benchmark_runs: int = 5
-    secret_key: str = Field(default_factory=lambda: "dbzenith_secure_dev_hmac_secret_key_change_in_prod_32bytes")
+    secret_key: str = Field(
+        default_factory=lambda: (
+            __import__("os").getenv("SECRET_KEY")
+            or __import__("os").getenv("JWT_SECRET_KEY")
+            or __import__("secrets").token_hex(32)
+        )
+    )
     token_ttl_seconds: int = 86400
     api_rate_limit_per_minute: int = 120
     auth_rate_limit_per_minute: int = 20
+    bootstrap_admin_password: str | None = None
+    bootstrap_dba_password: str | None = None
+    bootstrap_analyst_password: str | None = None
+    bootstrap_viewer_password: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

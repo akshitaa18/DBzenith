@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { sendAssistantMessage, type AssistantChatResponse } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 
 type ChatMessage = {
   id: string
@@ -15,12 +16,13 @@ type ChatMessage = {
 }
 
 export function ConversationalDBA() {
+  const { user, canSimulate, canApprove } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       role: 'assistant',
       content:
-        'Hello DBA! I am DBZenith\'s Conversational Assistant powered by LangGraph. I can analyze slow queries, evaluate execution plans, recommend optimizations, and run isolated sandbox simulations. How can I assist with your database workload today?',
+        "Hello! I am DBZenith's Conversational Assistant powered by LangGraph. I can analyze slow queries, evaluate execution plans, recommend optimizations, and run isolated sandbox simulations. How can I assist with your database workload today?",
       timestamp: new Date().toLocaleTimeString(),
       safetyCheckPassed: true,
     },
@@ -33,8 +35,8 @@ export function ConversationalDBA() {
   const quickPrompts = [
     'Analyze top slow queries and explain bottlenecks',
     'Recommend optimizations for high latency queries',
-    'Simulate pending recommendations in sandbox',
-    'Stage migration approval request for human DBA review',
+    ...(canSimulate ? ['Simulate pending recommendations in sandbox'] : []),
+    ...(canApprove ? ['Stage migration approval request for human DBA review'] : []),
   ]
 
   const handleSend = async (textToSend?: string) => {
@@ -53,7 +55,11 @@ export function ConversationalDBA() {
     setLoading(true)
 
     try {
-      const data: AssistantChatResponse = await sendAssistantMessage(query, sessionId, 'dba')
+      const data: AssistantChatResponse = await sendAssistantMessage(
+        query,
+        sessionId,
+        user?.role.toLowerCase() || 'viewer',
+      )
       setSessionId(data.session_id)
 
       const assistantMsg: ChatMessage = {
@@ -70,11 +76,11 @@ export function ConversationalDBA() {
       }
 
       setMessages((prev) => [...prev, assistantMsg])
-    } catch {
+    } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: 'Assistant communication error. Please ensure the DBZenith backend is running.',
+        content: err?.message || 'Assistant communication error. Please ensure the DBZenith backend is running.',
         timestamp: new Date().toLocaleTimeString(),
         safetyCheckPassed: false,
       }
@@ -220,7 +226,7 @@ export function ConversationalDBA() {
                   marginBottom: '0.35rem',
                 }}
               >
-                <span>{isUser ? 'You (DBA)' : 'DBZenith Assistant'}</span>
+                <span>{isUser ? `You (${user?.role || 'User'})` : 'DBZenith Assistant'}</span>
                 <span>{m.timestamp}</span>
               </div>
               <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.45, fontSize: '0.9rem' }}>

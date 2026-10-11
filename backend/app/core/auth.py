@@ -10,6 +10,7 @@ Implements:
 from __future__ import annotations
 
 import collections
+import threading
 import time
 from typing import Callable
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -22,6 +23,7 @@ from app.db.session import get_db
 from app.models.security import User
 
 security_scheme = HTTPBearer(auto_error=False)
+DB_CONCURRENCY_LOCK = threading.RLock()
 
 
 class RateLimiter:
@@ -107,16 +109,20 @@ def get_current_user_optional(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    # Verify DB user status if user exists in security_users
+    # Verify DB user status and sync authoritative role if user exists in security_users
     try:
         if str(payload.user_id).isdigit():
-            db_user = db.get(User, int(payload.user_id))
-            if db_user is not None and not db_user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="User account is inactive.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+            with DB_CONCURRENCY_LOCK:
+                db_user = db.get(User, int(payload.user_id))
+                if db_user is not None:
+                    if not db_user.is_active:
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="User account is inactive.",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                    payload.role = Role(db_user.role)
+                    payload.username = db_user.username
     except HTTPException:
         raise
     except Exception:
@@ -139,13 +145,51 @@ def get_current_user(
     return payload
 
 
-def require_role(min_role: Role) -> Callable[[TokenPayload], TokenPayload]:
+def _audit_forbidden(
+    request: Request,
+    db: Session,
+    user: TokenPayload,
+    required_role: str,
+) -> None:
+    try:
+        from app.services.audit.recorder import AuditEventCategory, record_audit_event
+
+        with DB_CONCURRENCY_LOCK:
+            record_audit_event(
+                db=db,
+                event_category=AuditEventCategory.SECURITY_VIOLATION,
+                action="unauthorized_role_access",
+                actor_id=str(user.user_id),
+                actor_username=user.username,
+                actor_role=user.role.value,
+                target_entity="Endpoint",
+                target_id=f"{request.method} {request.url.path}",
+                status="FAILURE",
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                details={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "required_role": required_role,
+                    "actual_role": user.role.value,
+                },
+            )
+    except Exception:
+        pass
+
+
+def require_role(min_role: Role) -> Callable[..., TokenPayload]:
     """Dependency factory checking that the authenticated user meets the minimum role rank."""
     min_weight = ROLE_HIERARCHY[min_role]
 
-    def _role_checker(user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
+    def _role_checker(
+        request: Request,
+        user: TokenPayload = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> TokenPayload:
         user_weight = ROLE_HIERARCHY.get(user.role, 0)
         if user_weight < min_weight:
+            _audit_forbidden(request, db, user, min_role.value)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Action requires at least {min_role.value} role (current role: {user.role.value}).",
@@ -162,9 +206,14 @@ require_dba = require_role(Role.DBA)
 require_admin = require_role(Role.ADMIN)
 
 
-def require_dba_or_admin(user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
+def require_dba_or_admin(
+    request: Request,
+    user: TokenPayload = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TokenPayload:
     """Strict guard: Only DBA and ADMIN can approve production-changing actions."""
     if user.role not in {Role.DBA, Role.ADMIN}:
+        _audit_forbidden(request, db, user, "DBA_OR_ADMIN")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Production action forbidden. Only DBA or ADMIN roles can approve migrations or mutate catalogs (current: {user.role.value}).",

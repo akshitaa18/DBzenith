@@ -6,6 +6,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+from app.core.provenance import ProvenanceBadgeLabel, ProvenanceState, badge_for_state
+
+
 class PlanAnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -31,3 +34,20 @@ class PlanAnalysisResponse(BaseModel):
     features: dict[str, Any]
     bottlenecks: list[dict[str, Any]]
     explanation: dict[str, Any]
+    provenance_state: str = ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+    provenance_badge: str = ProvenanceBadgeLabel.ESTIMATED.value
+    source_identifier: str | None = None
+    is_synthetic: bool = False
+    is_measured: bool = False
+    model_version: str | None = "deterministic-plan-analyzer-v0.7.0"
+
+    @model_validator(mode="after")
+    def normalize_provenance(self):
+        if self.is_synthetic or self.provenance_state == ProvenanceState.SYNTHETIC_DEMO.value:
+            self.provenance_state = ProvenanceState.SYNTHETIC_DEMO.value
+            self.provenance_badge = ProvenanceBadgeLabel.DEMO.value
+            self.is_synthetic = True
+            self.is_measured = False
+        else:
+            self.provenance_badge = badge_for_state(self.provenance_state)
+        return self

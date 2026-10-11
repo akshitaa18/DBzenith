@@ -15,6 +15,7 @@ from sqlalchemy.sql.sqltypes import NullType
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.provenance import ProvenanceState, sanitize_source_identifier
 from app.db.session import get_sandbox_engine
 from app.models.recommendation import OptimizationRecommendation
 from app.models.simulation import OptimizationSimulation
@@ -55,6 +56,13 @@ class SandboxSimulator:
             affected_queries=[], plan_differences=[], estimated_storage_impact={},
             write_overhead_estimate={}, limitations=[], benchmark={}, baseline_plans=[], proposed_plans=[],
             confidence=0.0,
+            provenance_state=ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+            source_identifier=sanitize_source_identifier(self.settings.sandbox_database_url),
+            simulation_method="hypopg_plan_estimate",
+            result_type=ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+            is_synthetic=False,
+            is_measured=False,
+            model_version="hypopg-sandbox-v0.7.0",
         )
         db.add(row)
         db.commit()
@@ -86,9 +94,9 @@ class SandboxSimulator:
                     setattr(row, key, value)
                 row.status = "completed"
                 row.limitations = [
-                    "Empirical sandbox evaluated using HypoPG analytical cost estimator (sandbox container offline).",
+                    "Evaluated using HypoPG analytical cost estimator (sandbox container offline).",
+                    "Estimated from planner cost model — not a measured runtime benchmark speedup.",
                     "Zero production disk allocation or table locks were incurred.",
-                    "PostgreSQL optimizer verified zero performance regressions across all workload queries.",
                 ]
                 db.commit()
                 db.refresh(row)
@@ -185,10 +193,26 @@ class SandboxSimulator:
             storage = self._storage_impact(db, spec)
             write = self._write_overhead(db, spec)
             confidence = self._confidence(recommendation.confidence, improvement, differences)
+            has_measured_benchmark = bool(request.benchmark_runs > 0 and benchmark_rows)
+            prov_state = (
+                ProvenanceState.SANDBOX_BENCHMARK.value
+                if has_measured_benchmark
+                else ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
+            )
+            sim_method = "sandbox_benchmark" if has_measured_benchmark else "hypopg_virtual_index"
             benchmark = {
                 "runs": request.benchmark_runs,
                 "queries": benchmark_rows,
-                "method": "sandbox-only real index benchmark; hypothetical index is used for plan comparison",
+                "is_measured": has_measured_benchmark,
+                "is_verified_speedup": False,
+                "provenance_state": prov_state,
+                "result_type": prov_state,
+                "simulation_method": sim_method,
+                "method": (
+                    "sandbox-only real index benchmark; hypothetical index is used for plan comparison"
+                    if has_measured_benchmark
+                    else "HypoPG virtual index EXPLAIN cost estimate only; no runtime benchmark executed"
+                ),
             }
             return {
                 "baseline_cost": round(baseline_cost, 3),
@@ -204,6 +228,13 @@ class SandboxSimulator:
                 "baseline_plans": baseline_plans,
                 "proposed_plans": proposed_plans,
                 "error": None,
+                "provenance_state": prov_state,
+                "source_identifier": sanitize_source_identifier(self.settings.sandbox_database_url),
+                "simulation_method": sim_method,
+                "result_type": prov_state,
+                "is_synthetic": False,
+                "is_measured": has_measured_benchmark,
+                "model_version": "hypopg-sandbox-v0.7.0",
             }
         finally:
             self._reset_sandbox()
@@ -594,10 +625,18 @@ class SandboxSimulator:
             for q in queries
         ]
 
+        prov_state = ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value
         benchmark_data = {
-            "runs": 3,
+            "runs": 0,
+            "is_measured": False,
+            "is_verified_speedup": False,
+            "provenance_state": prov_state,
+            "result_type": ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+            "simulation_method": "analytical_plan_estimate",
             "baseline_latency_ms": baseline_latency,
             "simulated_latency_ms": simulated_latency,
+            "estimated_latency_ms": simulated_latency,
+            "measured_latency_ms": None,
             "speedup_factor": speedup_factor,
             "p50_baseline_ms": baseline_latency,
             "p50_simulated_ms": simulated_latency,
@@ -608,11 +647,13 @@ class SandboxSimulator:
                     "proposed_mean_execution_ms": simulated_latency,
                     "speedup_factor": speedup_factor,
                     "cost_reduction_pct": improvement_pct,
+                    "is_measured": False,
                 }
                 for q in queries
             ],
             "zero_regressions_verified": True,
-            "workload_queries_checked": 28,
+            "workload_queries_checked": len(queries) or 1,
+            "method": "Hypothetical planner cost estimate — projected from EXPLAIN cost ratio, not a measured runtime benchmark",
         }
 
         return {
@@ -641,8 +682,15 @@ class SandboxSimulator:
             },
             "benchmark": benchmark_data,
             "limitations": [
-                "Evaluated using PostgreSQL HypoPG virtual index catalog primitives in isolated sandbox.",
+                "Estimated using HypoPG analytical planner cost model; not a measured runtime benchmark speedup.",
                 "Zero production disk write or exclusive table locks were generated.",
-                "Confirmed zero query regressions across all 28 workload telemetry queries.",
+                "Confirmed zero planner cost regressions across evaluated workload queries.",
             ],
+            "provenance_state": prov_state,
+            "source_identifier": sanitize_source_identifier(self.settings.database_url),
+            "simulation_method": "analytical_plan_estimate",
+            "result_type": ProvenanceState.HYPOTHETICAL_PLAN_ESTIMATE.value,
+            "is_synthetic": False,
+            "is_measured": False,
+            "model_version": "hypopg-analytical-estimator-v0.7.0",
         }

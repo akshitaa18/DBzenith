@@ -168,16 +168,36 @@ export function getHealth(): Promise<{ status: string; service: string; version:
   return request('/api/v1/health')
 }
 
+export type ProvenanceState =
+  | 'SYNTHETIC_DEMO'
+  | 'LIVE_TELEMETRY'
+  | 'HISTORICAL_OBSERVATION'
+  | 'HYPOTHETICAL_PLAN_ESTIMATE'
+  | 'SANDBOX_BENCHMARK'
+  | 'VERIFIED_POST_CHANGE'
+
+export type ProvenanceBadgeLabel = 'DEMO' | 'LIVE' | 'HISTORICAL' | 'ESTIMATED' | 'SIMULATED' | 'VERIFIED'
+
 export type QueryOptimizationSummary = {
   baseline_cost: number
   proposed_cost: number
   cost_improvement_pct: number
   baseline_latency_ms: number
   simulated_latency_ms: number
+  estimated_latency_ms?: number
+  measured_latency_ms?: number | null
   speedup_factor: number
   recommendation_id?: number | null
   recommendation_type?: string | null
   proposed_change?: string | null
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  result_type?: string
+  simulation_method?: string
+  is_synthetic?: boolean
+  is_measured?: boolean
+  is_verified_speedup?: boolean
+  estimate_vs_measured_explanation?: string
 }
 
 export type QueryDetail = {
@@ -206,6 +226,16 @@ export type QueryDetail = {
   predicate_info: Record<string, unknown> | null
   explain_plan: unknown
   optimization_summary?: QueryOptimizationSummary | null
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  source_identifier?: string | null
+  query_fingerprint?: string | null
+  captured_at?: string | null
+  window_seconds?: number | null
+  is_synthetic?: boolean
+  is_measured?: boolean
+  is_stale?: boolean
+  staleness_warning?: string | null
 }
 
 export type QueryPage = {
@@ -230,7 +260,24 @@ export type WorkloadSummary = {
     total_exec_time_ms: number
     calls: number
     query: string
+    query_fingerprint?: string | null
+    provenance_state?: ProvenanceState | string
+    provenance_badge?: ProvenanceBadgeLabel | string
+    source_identifier?: string | null
+    is_synthetic?: boolean
+    is_measured?: boolean
   }>
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  source_identifier?: string | null
+  collection_status?: string
+  collection_error?: string | null
+  is_synthetic?: boolean
+  is_measured?: boolean
+  is_stale?: boolean
+  staleness_seconds?: number | null
+  staleness_warning?: string | null
+  demo_mode_active?: boolean
 }
 
 export function getSlowQueries(page = 1, pageSize = 10, minMeanMs?: number): Promise<QueryPage> {
@@ -247,6 +294,8 @@ export function calculateQueryOptimizations(queryId?: number | string): Promise<
   status: string
   calculated_count: number
   new_simulations_created: number
+  result_type?: string
+  is_measured?: boolean
   items: QueryDetail[]
 }> {
   const path = queryId !== undefined ? `/api/v1/queries/calculate-optimizations?query_id=${queryId}` : '/api/v1/queries/calculate-optimizations'
@@ -267,6 +316,13 @@ export type PlanAnalysis = {
   features: Record<string, number>
   bottlenecks: Array<{ type: string; severity: string; evidence: Record<string, unknown>; affected_node: string; explanation: string; possible_remediation: string }>
   explanation: { summary: string; feature_highlights: Record<string, number>; method: string; gnn?: any }
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  source_identifier?: string | null
+  is_synthetic?: boolean
+  is_measured?: boolean
+  model_version?: string | null
+  estimate_vs_measured_explanation?: string
 }
 
 export function analyzePlan(
@@ -295,6 +351,13 @@ export type Recommendation = {
   affected_queries: Array<Record<string, unknown>>
   requires_approval: boolean
   status: 'pending' | 'approved' | 'rejected'
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  source_identifier?: string | null
+  is_synthetic?: boolean
+  is_measured?: boolean
+  model_version?: string | null
+  estimate_vs_measured_explanation?: string
 }
 
 export type RecommendationPage = {
@@ -340,6 +403,16 @@ export type Simulation = {
   baseline_plans: Array<Record<string, unknown>>
   proposed_plans: Array<Record<string, unknown>>
   error: string | null
+  provenance_state?: ProvenanceState | string
+  provenance_badge?: ProvenanceBadgeLabel | string
+  source_identifier?: string | null
+  simulation_method?: string | null
+  result_type?: string | null
+  is_synthetic?: boolean
+  is_measured?: boolean
+  is_verified_speedup?: boolean
+  model_version?: string | null
+  estimate_vs_measured_explanation?: string
 }
 
 export function createSimulation(recommendationId: number, benchmarkRuns = 3): Promise<Simulation> {
@@ -423,12 +496,7 @@ export function getReadiness(): Promise<{ status: string; database: string }> {
 }
 
 export async function getWorkloadSnapshots(limit = 10): Promise<Record<string, unknown>[]> {
-  try {
-    return await request<Record<string, unknown>[]>(`/api/v1/workload/snapshots?limit=${limit}`)
-  } catch {
-    const data = await request<Record<string, unknown>>(`/api/v1/workload/summary`)
-    return [data]
-  }
+  return request<Record<string, unknown>[]>(`/api/v1/workload/snapshots?limit=${limit}`)
 }
 
 export function getAssistantAuditLogs(): Promise<Array<{

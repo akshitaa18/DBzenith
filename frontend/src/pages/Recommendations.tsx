@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import { getRecommendations, Recommendation, createSimulation, Simulation } from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import {
+  EstimateVsMeasuredNotice,
+  ProvenanceBadge,
+  formatCollectionTimestamp,
+} from '../components/ProvenanceBadge'
 import { useAuth } from '../context/AuthContext'
 
 export function RecommendationsPage() {
@@ -117,8 +122,15 @@ export function RecommendationsPage() {
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>Index & Query Recommendations</h1>
+            {recommendations[0] && (
+              <ProvenanceBadge
+                badge={recommendations[0].provenance_badge || 'ESTIMATED'}
+                state={recommendations[0].provenance_state || 'HYPOTHETICAL_PLAN_ESTIMATE'}
+                isSynthetic={recommendations[0].is_synthetic}
+              />
+            )}
             <span className="badge badge-recommendation">RECOMMENDATION</span>
             <span className="badge badge-approval-required">APPROVAL REQUIRED</span>
           </div>
@@ -192,6 +204,11 @@ export function RecommendationsPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span className="badge badge-simulation">SIMULATION COMPLETED</span>
+              <ProvenanceBadge
+                badge={simulationResult.provenance_badge}
+                state={simulationResult.provenance_state}
+                isSynthetic={simulationResult.is_synthetic}
+              />
               <span style={{ fontWeight: 600, color: '#34d399' }}>
                 Recommendation #{simulationResult.recommendation_id} Tested
               </span>
@@ -271,10 +288,15 @@ export function RecommendationsPage() {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
                       #{rec.id}
                     </span>
+                    <ProvenanceBadge
+                      badge={rec.provenance_badge || 'ESTIMATED'}
+                      state={rec.provenance_state || 'HYPOTHETICAL_PLAN_ESTIMATE'}
+                      isSynthetic={rec.is_synthetic}
+                    />
                     <span className="badge" style={{ background: '#1e293b', color: '#38bdf8', fontWeight: 600 }}>
                       {rec.type}
                     </span>
@@ -351,12 +373,19 @@ export function RecommendationsPage() {
                     <div style={{ fontSize: '0.875rem', color: '#cbd5e1', marginTop: '4px' }}>{rec.reason}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Expected Benefit</div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Expected Benefit (Unmeasured Estimate)</div>
                     <div style={{ fontSize: '0.875rem', color: '#34d399', marginTop: '4px', fontWeight: 500 }}>
                       {rec.expected_benefit}
                     </div>
                   </div>
                 </div>
+
+                <EstimateVsMeasuredNotice
+                  isMeasured={rec.is_measured}
+                  isSynthetic={rec.is_synthetic}
+                  explanation={rec.estimate_vs_measured_explanation}
+                  modelVersion={rec.model_version}
+                />
 
                 {/* Metric Footer */}
                 <div
@@ -380,8 +409,13 @@ export function RecommendationsPage() {
                   <div>
                     Affected Queries: <strong style={{ color: '#cbd5e1' }}>{rec.affected_queries?.length ?? 0}</strong>
                   </div>
+                  {rec.source_identifier && (
+                    <div>
+                      Source: <code style={{ color: '#94a3b8' }}>{rec.source_identifier}</code>
+                    </div>
+                  )}
                   <div>
-                    Created: <span style={{ color: '#94a3b8' }}>{new Date(rec.created_at).toLocaleString()}</span>
+                    Created: <span style={{ color: '#94a3b8' }}>{formatCollectionTimestamp(rec.created_at)}</span>
                   </div>
                 </div>
 

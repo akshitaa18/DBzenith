@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { analyzePlan, getQueryDetail, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
+import { analyzePlan, getPlanAnalysis, getQueryDetail, rewriteSql, type PlanAnalysis, type SQLRewriteResponse } from '../lib/api'
 import { PlanVisualization } from '../components/PlanVisualization'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
+import { useAuth } from '../context/AuthContext'
 
 export function PlanViewer() {
+  const { canSimulate } = useAuth()
   const [searchParams] = useSearchParams()
   const initialSql =
     searchParams.get('sql') ||
@@ -38,8 +40,6 @@ export function PlanViewer() {
     const qid = searchParams.get('queryId')
     const sqlParam = searchParams.get('sql')
     if (qid) {
-      setLoading(true)
-      setError(null)
       getQueryDetail(qid)
         .then((q) => {
           if (q.normalized_query) {
@@ -47,6 +47,19 @@ export function PlanViewer() {
           }
         })
         .catch(() => {})
+    }
+    if (!canSimulate) {
+      setLoading(true)
+      setError(null)
+      getPlanAnalysis(1)
+        .then((res) => setAnalysis(res))
+        .catch(() => {})
+        .finally(() => setLoading(false))
+      return
+    }
+    if (qid) {
+      setLoading(true)
+      setError(null)
       analyzePlan({ query_id: qid })
         .then((res) => setAnalysis(res))
         .catch(() => handleAnalyze())
@@ -58,7 +71,7 @@ export function PlanViewer() {
     } else {
       handleAnalyze()
     }
-  }, [searchParams])
+  }, [searchParams, canSimulate])
 
   const handleRewrite = async () => {
     setRewriting(true)
@@ -120,22 +133,30 @@ export function PlanViewer() {
           rows={3}
           placeholder="Enter SELECT query to explain..."
         />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              className="primary-button"
-              onClick={handleAnalyze}
-              disabled={loading || !sql.trim()}
-            >
-              {loading ? 'Evaluating EXPLAIN Plan...' : 'Explain & Visualize Plan'}
-            </button>
-            <button
-              className="secondary-button"
-              onClick={handleRewrite}
-              disabled={rewriting || !sql.trim()}
-            >
-              {rewriting ? 'Analyzing AST...' : '⚡ AST Query Rewriter'}
-            </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {canSimulate ? (
+              <>
+                <button
+                  className="primary-button"
+                  onClick={handleAnalyze}
+                  disabled={loading || !sql.trim()}
+                >
+                  {loading ? 'Evaluating EXPLAIN Plan...' : 'Explain & Visualize Plan'}
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={handleRewrite}
+                  disabled={rewriting || !sql.trim()}
+                >
+                  {rewriting ? 'Analyzing AST...' : '⚡ AST Query Rewriter'}
+                </button>
+              </>
+            ) : (
+              <span className="badge" style={{ background: '#1e293b', color: '#94a3b8' }}>
+                🔒 Read-Only Plan View (ANALYST+ role required to run new EXPLAIN or AST rewrites)
+              </span>
+            )}
           </div>
           <small className="muted">Read-only constraint enforced: DDL/DML statements are rejected.</small>
         </div>
