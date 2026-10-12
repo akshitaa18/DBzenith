@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,12 @@ import torch
 from app.services.rl.agent import TrainableRLAgent
 
 
-DEFAULT_ARTIFACT_DIR = Path("ai/rl/models/v0.8.0")
+DEFAULT_ARTIFACT_DIR = Path(__file__).resolve().parent / "model_artifacts" / "v0.8.0"
+LEGACY_ARTIFACT_DIR = Path("ai/rl/models/v0.8.0")
+
+
+class RLArtifactMissingError(FileNotFoundError):
+    """Raised when required RL model artifacts are missing or corrupted."""
 
 
 def save_rl_artifacts(
@@ -57,22 +63,47 @@ def load_rl_artifacts(
 ) -> tuple[TrainableRLAgent, dict[str, Any]]:
     """Loads agent and metadata from a versioned directory."""
     target_dir = Path(directory)
+    if not target_dir.exists() and target_dir == LEGACY_ARTIFACT_DIR and DEFAULT_ARTIFACT_DIR.exists():
+        target_dir = DEFAULT_ARTIFACT_DIR
+
     weights_path = target_dir / "agent.pt"
     config_path = target_dir / "config.json"
+    metrics_path = target_dir / "metrics.json"
 
     if not weights_path.exists():
-        raise FileNotFoundError(f"RL weights not found at {weights_path}")
+        raise RLArtifactMissingError(f"RL weights not found at {weights_path}")
 
-    config_data = {}
+    config_data: dict[str, Any] = {}
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_data = json.load(f)
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception as exc:
+            raise RLArtifactMissingError(f"Corrupted RL config.json at {config_path}: {exc}") from exc
 
-    state_dim = config_data.get("state_dim", 38)
-    action_dim = config_data.get("action_dim", 6)
+    state_dim = int(config_data.get("state_dim", 38))
+    action_dim = int(config_data.get("action_dim", 6))
 
-    agent = TrainableRLAgent(state_dim=state_dim, action_dim=action_dim, device=device)
-    checkpoint = torch.load(weights_path, map_location=device)
-    agent.load_weights(checkpoint)
+    try:
+        agent = TrainableRLAgent(state_dim=state_dim, action_dim=action_dim, device=device)
+        checkpoint = torch.load(weights_path, map_location=device, weights_only=False)
+        agent.load_weights(checkpoint)
+        agent.q_net.eval()
+        agent.target_net.eval()
+    except Exception as exc:
+        raise RLArtifactMissingError(f"Failed to load RL weights from {weights_path}: {exc}") from exc
+
+    try:
+        config_data["artifact_sha256_prefix"] = hashlib.sha256(weights_path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        config_data["artifact_sha256_prefix"] = None
+
+    if metrics_path.exists():
+        try:
+            metrics_data = json.loads(metrics_path.read_text(encoding="utf-8"))
+            config_data["training_summary"] = metrics_data.get("training_summary")
+        except Exception:
+            pass
 
     return agent, config_data
+

@@ -168,6 +168,12 @@ class TelemetryCollector:
             self._prune_old_snapshots(db, keep=50)
             db.commit()
             db.refresh(snapshot)
+            try:
+                from app.services.alerts.engine import RegressionAlertEngine
+
+                RegressionAlertEngine().evaluate(db)
+            except Exception as exc:
+                logger.debug("alert_evaluation_after_collect_skipped: %s", exc)
             logger.info(
                 "telemetry_snapshot_collected",
                 extra={

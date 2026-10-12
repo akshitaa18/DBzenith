@@ -103,7 +103,10 @@ class SandboxRewriteValidator:
                     conn.execute(text("SET statement_timeout = '3000ms'"))
                     conn.execute(text("SET default_transaction_read_only = on"))
                 except Exception:
-                    pass
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                 # 1. Cost analysis via EXPLAIN (FORMAT JSON)
                 try:
                     orig_explain = conn.execute(text(f"EXPLAIN (FORMAT JSON) {orig_sql}")).scalar()
@@ -118,6 +121,10 @@ class SandboxRewriteValidator:
                     new_cost = float(new_explain[0]["Plan"]["Total Cost"])
                     cost_impr_pct = round(((base_cost - new_cost) / max(base_cost, 0.001)) * 100.0, 2)
                 except Exception as explain_err:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                     base_cost = 100.0
                     new_cost = 80.0
                     cost_impr_pct = 20.0
@@ -156,6 +163,10 @@ class SandboxRewriteValidator:
                     semantic_match = True
 
                 except Exception as exec_err:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                     err_str = str(exec_err).lower()
                     if "does not exist" in err_str or "no such table" in err_str:
                         return {

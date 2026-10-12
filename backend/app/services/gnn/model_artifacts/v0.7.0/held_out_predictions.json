@@ -1,0 +1,1442 @@
+[
+  {
+    "graph_id": "test-family_12-000",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-001",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-002",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-003",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-004",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-005",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-006",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-007",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-008",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-009",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-010",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-011",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-012",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-013",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-014",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-015",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-016",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-017",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-018",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-019",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-020",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-021",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-022",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_12-023",
+    "template_group": "family_12",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-000",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-000",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 0.5272
+  },
+  {
+    "graph_id": "test-family_13-001",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-001",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9783
+  },
+  {
+    "graph_id": "test-family_13-002",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-002",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9998
+  },
+  {
+    "graph_id": "test-family_13-003",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-003",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9671
+  },
+  {
+    "graph_id": "test-family_13-004",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-004",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-005",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-005",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9663
+  },
+  {
+    "graph_id": "test-family_13-006",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-006",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-007",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-007",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9786
+  },
+  {
+    "graph_id": "test-family_13-008",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-008",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-009",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-009",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9858
+  },
+  {
+    "graph_id": "test-family_13-010",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-010",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-011",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-011",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9873
+  },
+  {
+    "graph_id": "test-family_13-012",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-012",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-013",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-013",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9883
+  },
+  {
+    "graph_id": "test-family_13-014",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-014",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-015",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-015",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9753
+  },
+  {
+    "graph_id": "test-family_13-016",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-016",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-017",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-017",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.983
+  },
+  {
+    "graph_id": "test-family_13-018",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-018",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-019",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-019",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9677
+  },
+  {
+    "graph_id": "test-family_13-020",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-020",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 1,
+    "true_label": "sequential_scan",
+    "predicted_label_id": 1,
+    "predicted_label": "sequential_scan",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-021",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-021",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9901
+  },
+  {
+    "graph_id": "test-family_13-022",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 2,
+    "true_label": "nested_loop",
+    "predicted_label_id": 2,
+    "predicted_label": "nested_loop",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-022",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-023",
+    "template_group": "family_13",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_13-023",
+    "template_group": "family_13",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9919
+  },
+  {
+    "graph_id": "test-family_14-000",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-000",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9996
+  },
+  {
+    "graph_id": "test-family_14-000",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.7485
+  },
+  {
+    "graph_id": "test-family_14-001",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-001",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-001",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9967
+  },
+  {
+    "graph_id": "test-family_14-002",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-002",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9999
+  },
+  {
+    "graph_id": "test-family_14-002",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.8036
+  },
+  {
+    "graph_id": "test-family_14-003",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-003",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9997
+  },
+  {
+    "graph_id": "test-family_14-003",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.8956
+  },
+  {
+    "graph_id": "test-family_14-004",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-004",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-004",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9866
+  },
+  {
+    "graph_id": "test-family_14-005",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-005",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9997
+  },
+  {
+    "graph_id": "test-family_14-005",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9332
+  },
+  {
+    "graph_id": "test-family_14-006",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-006",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-006",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9438
+  },
+  {
+    "graph_id": "test-family_14-007",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-007",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 0.9556
+  },
+  {
+    "graph_id": "test-family_14-007",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9144
+  },
+  {
+    "graph_id": "test-family_14-008",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-008",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-008",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9221
+  },
+  {
+    "graph_id": "test-family_14-009",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-009",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9994
+  },
+  {
+    "graph_id": "test-family_14-009",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.8314
+  },
+  {
+    "graph_id": "test-family_14-010",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-010",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-010",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.6623
+  },
+  {
+    "graph_id": "test-family_14-011",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-011",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9991
+  },
+  {
+    "graph_id": "test-family_14-011",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.7881
+  },
+  {
+    "graph_id": "test-family_14-012",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-012",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-012",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9056
+  },
+  {
+    "graph_id": "test-family_14-013",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-013",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 0.9992
+  },
+  {
+    "graph_id": "test-family_14-013",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9917
+  },
+  {
+    "graph_id": "test-family_14-014",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-014",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-014",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.937
+  },
+  {
+    "graph_id": "test-family_14-015",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-015",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9993
+  },
+  {
+    "graph_id": "test-family_14-015",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.8146
+  },
+  {
+    "graph_id": "test-family_14-016",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-016",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-016",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9705
+  },
+  {
+    "graph_id": "test-family_14-017",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-017",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9995
+  },
+  {
+    "graph_id": "test-family_14-017",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9133
+  },
+  {
+    "graph_id": "test-family_14-018",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-018",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-018",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9284
+  },
+  {
+    "graph_id": "test-family_14-019",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-019",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-019",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9982
+  },
+  {
+    "graph_id": "test-family_14-020",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-020",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-020",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.831
+  },
+  {
+    "graph_id": "test-family_14-021",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-021",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9991
+  },
+  {
+    "graph_id": "test-family_14-021",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.8357
+  },
+  {
+    "graph_id": "test-family_14-022",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 3,
+    "true_label": "expensive_sort",
+    "predicted_label_id": 3,
+    "predicted_label": "expensive_sort",
+    "confidence": 0.9999
+  },
+  {
+    "graph_id": "test-family_14-022",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 4,
+    "true_label": "row_estimation_error",
+    "predicted_label_id": 4,
+    "predicted_label": "row_estimation_error",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-022",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.992
+  },
+  {
+    "graph_id": "test-family_14-023",
+    "template_group": "family_14",
+    "node_id": "n1",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 1.0
+  },
+  {
+    "graph_id": "test-family_14-023",
+    "template_group": "family_14",
+    "node_id": "n2",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.9995
+  },
+  {
+    "graph_id": "test-family_14-023",
+    "template_group": "family_14",
+    "node_id": "n3",
+    "true_label_id": 0,
+    "true_label": "none",
+    "predicted_label_id": 0,
+    "predicted_label": "none",
+    "confidence": 0.835
+  }
+]

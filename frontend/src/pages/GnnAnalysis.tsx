@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { analyzePlan, getPlanAnalysis, getQueryDetail, getRlStatus, optimizeWithRl, PlanAnalysis } from '../lib/api'
+import {
+  analyzePlan,
+  getGnnEvaluation,
+  getPlanAnalysis,
+  getQueryDetail,
+  getRlEvaluation,
+  getRlStatus,
+  GnnEvaluationReport,
+  optimizeWithRl,
+  PlanAnalysis,
+  RlEvaluationReport,
+} from '../lib/api'
 import { OptimizationFlowHeader } from '../components/OptimizationFlowHeader'
 import { OptimizationTrace } from '../components/OptimizationTrace'
 import { useAuth } from '../context/AuthContext'
@@ -67,14 +78,27 @@ export function GnnAnalysisPage() {
   const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'bottlenecks' | 'graph' | 'features' | 'rl'>('bottlenecks')
+  const [activeTab, setActiveTab] = useState<'bottlenecks' | 'graph' | 'features' | 'rl' | 'evaluation'>('bottlenecks')
 
   // RL Engine State
   const [rlResult, setRlResult] = useState<any | null>(null)
   const [rlLoading, setRlLoading] = useState(false)
   const [rlStatusData, setRlStatusData] = useState<any | null>(null)
 
+  // Phase 9 Evaluation & Transparency Reports
+  const [gnnEvalReport, setGnnEvalReport] = useState<GnnEvaluationReport | null>(null)
+  const [rlEvalReport, setRlEvalReport] = useState<RlEvaluationReport | null>(null)
+
   const loadedParamRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    getGnnEvaluation()
+      .then((rep) => setGnnEvalReport(rep))
+      .catch(() => {})
+    getRlEvaluation()
+      .then((rep) => setRlEvalReport(rep))
+      .catch(() => {})
+  }, [])
 
   // Auto-load query context if queryId is in URL query parameters
   useEffect(() => {
@@ -155,7 +179,17 @@ export function GnnAnalysisPage() {
     return null
   }
 
+  const gnnBlock = (analysis?.explanation as any)?.gnn
+  const gnnTransparency = gnnBlock?.transparency
+  const gnnSourceClass = gnnBlock?.source_classification || gnnTransparency?.source_classification || 'LEARNED_MODEL'
+  const gnnIsFallback = Boolean(gnnBlock?.is_fallback || gnnTransparency?.is_fallback)
   const gnnSummaryText = (analysis?.explanation as any)?.gnn_summary || analysis?.explanation?.summary
+  const topGnnBottleneckConfidence: number | null =
+    gnnIsFallback
+      ? null
+      : typeof gnnBlock?.flagged_bottlenecks?.[0]?.confidence === 'number'
+      ? gnnBlock.flagged_bottlenecks[0].confidence
+      : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -168,9 +202,21 @@ export function GnnAnalysisPage() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700 }}>GNN Plan Analysis & Cost Model</h1>
             <span className="badge badge-ai-analysis">AI STRUCTURAL CLASSIFIER</span>
+            <span
+              className="badge"
+              style={{
+                background: 'rgba(245, 158, 11, 0.14)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                color: '#fcd34d',
+                fontSize: '0.72rem',
+              }}
+              title="Models are trained and evaluated on synthetic and representative held-out plans, not live customer workloads."
+            >
+              SYNTHETIC / HELD-OUT EVAL ONLY — NOT VALIDATED ON REAL PRODUCTION WORKLOADS
+            </span>
             {currentQueryId && (
               <span className="badge badge-observed">Query #{currentQueryId}</span>
             )}
@@ -181,30 +227,106 @@ export function GnnAnalysisPage() {
         </div>
       </div>
 
-      {/* Architectural Transparency Banner */}
+      {/* Architectural Transparency & Provenance Classification Banner */}
       <div className="guide-banner">
         <div className="guide-banner-icon">🧠</div>
         <div className="guide-banner-content">
-          <div className="guide-banner-title">
+          <div className="guide-banner-title" style={{ flexWrap: 'wrap', gap: '8px' }}>
             <span>GRAPH NEURAL NETWORK PLAN EMBEDDING & RL POLICY</span>
-            <span className="badge badge-ai-analysis">AI STRUCTURAL CLASSIFIER</span>
+            <span className="badge badge-ai-analysis">
+              GNN: {gnnEvalReport?.model_name || 'BottleneckGNN'} ({gnnEvalReport?.model_version || 'v0.7.0-synth-20261003'})
+            </span>
+            <span className="badge badge-simulation">
+              RL: {rlEvalReport?.model_name || 'DBZenith DQN Policy'} ({rlEvalReport?.model_version || 'v0.8.0'})
+            </span>
           </div>
           <p className="guide-banner-desc">
-            DBZenith models PostgreSQL execution trees as directed operator graphs using PyTorch Geometric GNN embeddings. This allows the system to predict cost curves and evaluate Reinforcement Learning index selection policies without exposing any user data (0 bytes raw table data exposure).
+            DBZenith models PostgreSQL execution trees as directed operator graphs using message-passing GNN embeddings and a sandbox-gated RL policy. Every output is tagged with its provenance class: <code>REAL_OBSERVATION</code> (catalog/telemetry), <code>SANDBOX_SIMULATION</code> (isolated sandbox execution), <code>LEARNED_MODEL</code> (neural weights), or <code>DETERMINISTIC_FALLBACK</code> (rule-based heuristics when artifacts are unavailable or out-of-distribution).
           </p>
-          <div className="guide-banner-pills">
-            <span className="badge badge-observed">Execution Plan</span>
+          <div className="guide-banner-pills" style={{ flexWrap: 'wrap' }}>
+            <span className="badge badge-observed">REAL_OBSERVATION: EXPLAIN Plan</span>
             <span>&rarr;</span>
-            <span className="badge badge-success">Privacy Gateway</span>
+            <span className="badge badge-success">Privacy Gateway (0-byte raw exposure)</span>
             <span>&rarr;</span>
-            <span className="badge badge-ai-analysis">GNN Node Classification</span>
+            <span className="badge badge-ai-analysis">LEARNED_MODEL / DETERMINISTIC_FALLBACK</span>
             <span>&rarr;</span>
-            <span className="badge badge-simulation">Evidence Extraction</span>
+            <span className="badge badge-simulation">SANDBOX_SIMULATION</span>
             <span>&rarr;</span>
-            <span className="badge badge-recommendation">Actionable Decision</span>
+            <span className="badge badge-recommendation">Human Approval Gate</span>
           </div>
         </div>
       </div>
+
+      {/* Model Transparency & Evaluation Quick-Summary Strip */}
+      {(gnnEvalReport || rlEvalReport) && (
+        <div
+          className="card"
+          style={{
+            padding: '14px 16px',
+            borderLeft: '4px solid #a78bfa',
+            background: 'rgba(167, 139, 250, 0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: '0.85rem', color: '#e2e8f0' }}>
+                Model Evaluation & Transparency Registry
+              </strong>
+              <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', fontSize: '0.7rem' }}>
+                Dataset: {gnnEvalReport?.dataset_type || 'SYNTHETIC_AND_REPRESENTATIVE_HELD_OUT_PLANS'}
+              </span>
+              <span className="badge" style={{ background: '#1e293b', color: '#94a3b8', fontSize: '0.7rem' }}>
+                Last Evaluated: {gnnEvalReport?.evaluated_at ? new Date(gnnEvalReport.evaluated_at).toLocaleString() : 'N/A'}
+              </span>
+            </div>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+              onClick={() => setActiveTab('evaluation')}
+            >
+              View Full Evaluation & Leakage Audit &rarr;
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', fontSize: '0.78rem' }}>
+            {gnnEvalReport && (
+              <>
+                <div style={{ background: '#090d16', padding: '8px 10px', borderRadius: '4px', border: '1px solid #1e293b' }}>
+                  <div style={{ color: '#94a3b8' }}>GNN Grouped Test Accuracy (No Leakage):</div>
+                  <div style={{ color: '#38bdf8', fontWeight: 700, marginTop: '2px' }}>
+                    {(gnnEvalReport.grouped_test_metrics.gnn.accuracy * 100).toFixed(1)}% (Macro-F1: {gnnEvalReport.grouped_test_metrics.gnn.macro_f1.toFixed(3)})
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: '0.7rem' }}>
+                    vs Rule Baseline: {(gnnEvalReport.grouped_test_metrics.rule_based_baseline.accuracy * 100).toFixed(1)}% ({gnnEvalReport.dataset_sizes.grouped_leakage_free.test_nodes} test nodes)
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '8px 10px', borderRadius: '4px', border: '1px solid #1e293b' }}>
+                  <div style={{ color: '#94a3b8' }}>GNN Held-Out Workload Plans:</div>
+                  <div style={{ color: '#10b981', fontWeight: 700, marginTop: '2px' }}>
+                    {(gnnEvalReport.held_out_workload_metrics.gnn.accuracy * 100).toFixed(1)}% Accuracy ({gnnEvalReport.dataset_sizes.grouped_leakage_free.held_out_workload_graphs} plans / {gnnEvalReport.dataset_sizes.grouped_leakage_free.held_out_workload_nodes} nodes)
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: '0.7rem' }}>
+                    Legacy 100% synthetic score audited (37.5% node overlap)
+                  </div>
+                </div>
+              </>
+            )}
+            {rlEvalReport && (
+              <div style={{ background: '#090d16', padding: '8px 10px', borderRadius: '4px', border: '1px solid #1e293b' }}>
+                <div style={{ color: '#94a3b8' }}>RL Multi-Regime Safety-Gated Policy:</div>
+                <div style={{ color: '#a78bfa', fontWeight: 700, marginTop: '2px' }}>
+                  {rlEvalReport.diverse_multi_regime_evaluation.policy_summaries.safety_gated_dqn_agent?.valid_action_rate_pct}% Valid Actions | {rlEvalReport.diverse_multi_regime_evaluation.policy_summaries.safety_gated_dqn_agent?.regression_frequency_pct}% Regressions
+                </div>
+                <div style={{ color: '#64748b', fontSize: '0.7rem' }}>
+                  Raw DQN Valid Rate: {rlEvalReport.diverse_multi_regime_evaluation.policy_summaries.raw_dqn_agent?.valid_action_rate_pct}% ({rlEvalReport.diverse_multi_regime_evaluation.scenario_count} OOD scenarios)
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Query Input Box */}
       <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -312,11 +434,13 @@ export function GnnAnalysisPage() {
             </div>
 
             <div className="card" style={{ padding: '14px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Inference Method</div>
-              <div style={{ fontSize: '1rem', fontWeight: 600, color: '#a78bfa', marginTop: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Inference Source & Mode</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: 600, color: gnnIsFallback ? '#f59e0b' : '#a78bfa', marginTop: '4px' }}>
+                {gnnSourceClass}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
                 {analysis.explanation?.method || 'GCN Message-Passing + Explanation'}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>Structural plan cost modeling</div>
             </div>
           </div>
 
@@ -324,7 +448,7 @@ export function GnnAnalysisPage() {
           {gnnSummaryText && (
             <div className="card" style={{ padding: '14px 16px', borderLeft: '4px solid #38bdf8', background: 'rgba(56, 189, 248, 0.04)' }}>
               <div style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
-                GNN Analysis Summary & Structural Reasoning:
+                GNN Analysis Summary & Structural Reasoning ({gnnSourceClass}):
               </div>
               <div style={{ fontSize: '13px', color: '#f8fafc', lineHeight: 1.5 }}>
                 {gnnSummaryText}
@@ -366,6 +490,12 @@ export function GnnAnalysisPage() {
             >
               RL Optimization Policy 🤖
             </button>
+            <button
+              className={`subnav-tab ${activeTab === 'evaluation' ? 'active' : ''}`}
+              onClick={() => setActiveTab('evaluation')}
+            >
+              Model Evaluation & Transparency 📊
+            </button>
           </div>
 
           {/* Tab 1: Bottlenecks */}
@@ -390,7 +520,9 @@ export function GnnAnalysisPage() {
                           Affected Node: <code>{bn.affected_node}</code>
                         </span>
                       </div>
-                      <span className="badge badge-ai-analysis">GNN BOTTLENECK CLASSIFICATION</span>
+                      <span className="badge badge-ai-analysis">
+                        {gnnIsFallback ? 'DETERMINISTIC_FALLBACK' : 'LEARNED_MODEL'}
+                      </span>
                     </div>
 
                     <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#e2e8f0', lineHeight: 1.5 }}>
@@ -447,7 +579,7 @@ export function GnnAnalysisPage() {
                     reason: analysis.bottlenecks[0].explanation || 'GNN structural cost surrogate detected high-cost plan node',
                     expected_benefit: 'Cost reduction indicated by graph surrogate model',
                     risk: analysis.bottlenecks[0].severity === 'high' ? 'medium' : 'low',
-                    confidence: 0.91,
+                    confidence: topGnnBottleneckConfidence ?? 0,
                     status: 'pending',
                     requires_approval: true,
                     created_at: new Date().toISOString(),
@@ -627,10 +759,10 @@ export function GnnAnalysisPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f8fafc' }}>
-                    Reinforcement Learning Optimization Engine (PPO / DQN Policy)
+                    Reinforcement Learning Optimization Engine (DQN Policy + Safety Gate)
                   </h3>
                   <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.8rem' }}>
-                    Agent formulates discrete optimization actions (Index, Rewrite, Partition, Join) based on GNN plan state representations.
+                    Agent formulates discrete optimization actions (Index, Rewrite, Partition, Join) based on sanitized plan state representations.
                   </p>
                 </div>
                 {canSimulate ? (
@@ -669,7 +801,7 @@ export function GnnAnalysisPage() {
 
               {/* Invariant badge */}
               <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px 14px', fontSize: '0.8rem', color: '#38bdf8' }}>
-                🛡️ <strong>RL Safety Boundary:</strong> State representation &rarr; Candidate actions &rarr; Policy selection &rarr; Sandbox validation &rarr; Human sign-off. The RL model is strictly isolated from production catalogs.
+                🛡️ <strong>RL Safety Boundary:</strong> State representation &rarr; Precondition safety gate &rarr; Policy selection &rarr; Sandbox validation &rarr; Human sign-off. Model outputs cannot directly authorize production changes (human approval is independent of model confidence).
               </div>
 
               {/* Status and Action space */}
@@ -693,21 +825,39 @@ export function GnnAnalysisPage() {
               {/* RL Execution Result */}
               {rlResult && (
                 <div style={{ marginTop: '10px', background: '#0d1527', border: '1px solid #2563eb', borderRadius: '6px', padding: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span className="badge badge-ai-analysis">SELECTED ACTION</span>
                       <strong style={{ color: '#38bdf8', fontSize: '1rem' }}>
                         {rlResult.action_type}
                       </strong>
+                      <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', fontSize: '0.72rem' }}>
+                        Source: {rlResult.source_classification || (rlResult.is_fallback ? 'DETERMINISTIC_FALLBACK' : 'LEARNED_MODEL')}
+                      </span>
+                      <span className="badge badge-simulation" style={{ fontSize: '0.72rem' }}>
+                        Outcome: {rlResult.simulation_source_classification || 'SANDBOX_SIMULATION'}
+                      </span>
                     </div>
                     <span className="badge badge-success">
-                      Predicted Reward: +{rlResult.predicted_reward?.toFixed(2)}
+                      Predicted Reward: {rlResult.predicted_reward >= 0 ? '+' : ''}{rlResult.predicted_reward?.toFixed(2)}
                     </span>
                   </div>
 
                   <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#cbd5e1' }}>
                     {rlResult.explanation}
                   </p>
+
+                  {rlResult.safety_gate_triggered && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: '4px', fontSize: '0.78rem', color: '#fcd34d' }}>
+                      <strong>Precondition Safety Gate Intervened:</strong> Raw DQN proposed <code>{rlResult.raw_dqn_proposed_action}</code>, which was blocked ({rlResult.fallback_reason}). Deterministic DBA heuristic fallback selected <code>{rlResult.action_type}</code>.
+                    </div>
+                  )}
+
+                  {Array.isArray(rlResult.ood_warnings) && rlResult.ood_warnings.length > 0 && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '4px', fontSize: '0.75rem', color: '#bae6fd' }}>
+                      <strong>Out-of-Distribution Warnings:</strong> {rlResult.ood_warnings.join(' | ')}
+                    </div>
+                  )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '0.8rem' }}>
                     <div>
@@ -720,15 +870,269 @@ export function GnnAnalysisPage() {
                     </div>
                     <div>
                       <span style={{ color: '#94a3b8' }}>Confidence: </span>
-                      <span style={{ color: '#38bdf8', fontWeight: 600 }}>{Math.round((rlResult.confidence || 0) * 100)}%</span>
+                      <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                        {rlResult.confidence == null
+                          ? 'N/A (Deterministic Heuristic Fallback)'
+                          : `${Math.round(rlResult.confidence * 100)}% (Learned Q-Softmax)`}
+                      </span>
                     </div>
                     <div>
                       <span style={{ color: '#94a3b8' }}>Simulated Cost Reduction: </span>
                       <span style={{ color: '#10b981', fontWeight: 700 }}>{rlResult.simulated_cost_reduction_pct?.toFixed(1)}%</span>
                     </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>Production Authorization: </span>
+                      <span style={{ color: '#fcd34d', fontWeight: 600 }}>
+                        Requires Human Approval (Production Modified: {String(rlResult.production_modified ?? false)})
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Tab 5: Model Evaluation & Transparency */}
+          {activeTab === 'evaluation' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* GNN Evaluation Section */}
+              <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#f8fafc' }}>
+                      Part A: GNN Bottleneck Classifier Evaluation & Leakage Investigation
+                    </h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                      Model: <code>{gnnEvalReport?.model_name || 'BottleneckGNN'}</code> | Version: <code>{gnnEvalReport?.model_version || 'v0.7.0-synth-20261003'}</code> | Dataset: <code>{gnnEvalReport?.dataset_type || 'SYNTHETIC_AND_REPRESENTATIVE_HELD_OUT_PLANS'}</code>
+                    </p>
+                  </div>
+                  <span className="badge badge-warning">
+                    Validated on Real Workloads: {String(gnnEvalReport?.validated_on_real_workloads ?? false).toUpperCase()}
+                  </span>
+                </div>
+
+                {gnnEvalReport ? (
+                  <>
+                    {/* Investigation of Legacy 1.0 Accuracy */}
+                    <div style={{ background: '#090d16', border: '1px solid #1e293b', borderLeft: '4px solid #f59e0b', borderRadius: '6px', padding: '12px' }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fcd34d', marginBottom: '4px' }}>
+                        Investigation of Legacy Reported 1.000 Accuracy / 1.000 Macro-F1 (250 Synthetic Graphs):
+                      </div>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+                        {gnnEvalReport.legacy_perfect_score_investigation.explanation}
+                      </p>
+                    </div>
+
+                    {/* Grouped Test Split Comparison: GNN vs MLP vs Rule-Based Baseline */}
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                        Leakage-Free Grouped Test Split Comparison ({gnnEvalReport.dataset_sizes.grouped_leakage_free.test_graphs} graphs / {gnnEvalReport.dataset_sizes.grouped_leakage_free.test_nodes} nodes, Seed {gnnEvalReport.reproducibility.evaluation_seed}):
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="table" style={{ width: '100%', fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Model / Baseline</th>
+                              <th>Source Class</th>
+                              <th>Accuracy</th>
+                              <th>Macro Precision</th>
+                              <th>Macro Recall</th>
+                              <th>Macro F1</th>
+                              <th>Weighted F1</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td><strong>BottleneckGNN (2-Layer Message Passing)</strong></td>
+                              <td><code>LEARNED_MODEL</code></td>
+                              <td>{(gnnEvalReport.grouped_test_metrics.gnn.accuracy * 100).toFixed(2)}%</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.gnn.macro_precision.toFixed(4)}</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.gnn.macro_recall.toFixed(4)}</td>
+                              <td><strong>{gnnEvalReport.grouped_test_metrics.gnn.macro_f1.toFixed(4)}</strong></td>
+                              <td>{gnnEvalReport.grouped_test_metrics.gnn.weighted_f1.toFixed(4)}</td>
+                            </tr>
+                            <tr>
+                              <td>MLP Node Classifier (No Graph Edges)</td>
+                              <td><code>LEARNED_MODEL</code></td>
+                              <td>{(gnnEvalReport.grouped_test_metrics.mlp_baseline.accuracy * 100).toFixed(2)}%</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.mlp_baseline.macro_precision.toFixed(4)}</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.mlp_baseline.macro_recall.toFixed(4)}</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.mlp_baseline.macro_f1.toFixed(4)}</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.mlp_baseline.weighted_f1.toFixed(4)}</td>
+                            </tr>
+                            <tr>
+                              <td><strong>RuleBasedNodeBaseline (Deterministic DBA Rules)</strong></td>
+                              <td><code>DETERMINISTIC_FALLBACK</code></td>
+                              <td>{(gnnEvalReport.grouped_test_metrics.rule_based_baseline.accuracy * 100).toFixed(2)}%</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.rule_based_baseline.macro_precision.toFixed(4)}</td>
+                              <td>{gnnEvalReport.grouped_test_metrics.rule_based_baseline.macro_recall.toFixed(4)}</td>
+                              <td><strong>{gnnEvalReport.grouped_test_metrics.rule_based_baseline.macro_f1.toFixed(4)}</strong></td>
+                              <td>{gnnEvalReport.grouped_test_metrics.rule_based_baseline.weighted_f1.toFixed(4)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Per-Class Precision, Recall, F1 & Support */}
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                        GNN Per-Class Metrics on Grouped Test Split:
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="table" style={{ width: '100%', fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Class Label</th>
+                              <th>Precision</th>
+                              <th>Recall</th>
+                              <th>F1 Score</th>
+                              <th>Support (Nodes)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(gnnEvalReport.grouped_test_metrics.gnn.per_class).map(([label, m]) => (
+                              <tr key={label}>
+                                <td><code>{label}</code></td>
+                                <td>{m.precision.toFixed(4)}</td>
+                                <td>{m.recall.toFixed(4)}</td>
+                                <td><strong>{m.f1.toFixed(4)}</strong></td>
+                                <td>{m.support}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Confusion Matrix */}
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                        Confusion Matrix (Rows = Ground Truth, Columns = Predicted Class):
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                          <thead>
+                            <tr>
+                              <th>True \ Pred</th>
+                              {gnnEvalReport.grouped_test_metrics.gnn.confusion_matrix.labels.map((lbl) => (
+                                <th key={lbl}><code>{lbl}</code></th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {gnnEvalReport.grouped_test_metrics.gnn.confusion_matrix.matrix.map((row, rIdx) => {
+                              const rowLabel = gnnEvalReport.grouped_test_metrics.gnn.confusion_matrix.labels[rIdx]
+                              return (
+                                <tr key={rowLabel}>
+                                  <td><strong><code>{rowLabel}</code></strong></td>
+                                  {row.map((val, cIdx) => (
+                                    <td
+                                      key={cIdx}
+                                      style={{
+                                        fontWeight: rIdx === cIdx ? 700 : 400,
+                                        color: rIdx === cIdx ? '#10b981' : val > 0 ? '#f59e0b' : '#64748b',
+                                      }}
+                                    >
+                                      {val}
+                                    </td>
+                                  ))}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Loading GNN evaluation report...</div>
+                )}
+              </div>
+
+              {/* RL Evaluation Section */}
+              <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#f8fafc' }}>
+                      Part B: Reinforcement Learning Policy Evaluation & Training Regression Audit
+                    </h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                      Model: <code>{rlEvalReport?.model_name || 'DBZenith DQN Optimization Policy'}</code> | Version: <code>{rlEvalReport?.model_version || 'v0.8.0'}</code> | Seed: <code>{rlEvalReport?.reproducibility.evaluation_seed || 20000}</code>
+                    </p>
+                  </div>
+                  <span className="badge badge-warning">
+                    Validated on Real Workloads: {String(rlEvalReport?.validated_on_real_workloads ?? false).toUpperCase()}
+                  </span>
+                </div>
+
+                {rlEvalReport ? (
+                  <>
+                    {/* Investigation of 303 Training Regressions */}
+                    <div style={{ background: '#090d16', border: '1px solid #1e293b', borderLeft: '4px solid #38bdf8', borderRadius: '6px', padding: '12px' }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#38bdf8', marginBottom: '6px' }}>
+                        Audit of Recorded Training Regressions ({rlEvalReport.training_regression_investigation.recorded_total_regressions} regressions across {rlEvalReport.training_regression_investigation.recorded_total_training_steps} steps = {rlEvalReport.training_regression_investigation.recorded_training_regression_rate_pct}%):
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.78rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+                        {rlEvalReport.training_regression_investigation.root_causes.map((rc, i) => (
+                          <li key={i} style={{ marginBottom: '4px' }}>{rc}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Multi-Regime Policy Comparison Table */}
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                        Multi-Regime Held-Out Evaluation ({rlEvalReport.diverse_multi_regime_evaluation.scenario_count} Scenarios Across {rlEvalReport.diverse_multi_regime_evaluation.regimes_covered.length} Regimes):
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="table" style={{ width: '100%', fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Policy</th>
+                              <th>Valid Action Rate</th>
+                              <th>Regression Freq.</th>
+                              <th>Failure Rate</th>
+                              <th>Mean Reward (±Std)</th>
+                              <th>Median Latency Impr. (p10..p90)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(rlEvalReport.diverse_multi_regime_evaluation.policy_summaries).map(([pName, s]) => (
+                              <tr key={pName}>
+                                <td><strong><code>{pName}</code></strong></td>
+                                <td>{s.valid_action_rate_pct.toFixed(1)}%</td>
+                                <td style={{ color: s.regression_frequency_pct > 0 ? '#ef4444' : '#10b981', fontWeight: 600 }}>
+                                  {s.regression_frequency_pct.toFixed(1)}%
+                                </td>
+                                <td>{s.failure_rate_pct.toFixed(1)}%</td>
+                                <td>{s.reward_stability.mean_reward.toFixed(3)} (±{s.reward_stability.std_reward.toFixed(3)})</td>
+                                <td>
+                                  {s.improvement_distribution.latency_improvement_pct.p50_median.toFixed(1)}% ({s.improvement_distribution.latency_improvement_pct.p10.toFixed(1)}% .. {s.improvement_distribution.latency_improvement_pct.p90.toFixed(1)}%)
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Known Limitations */}
+                    <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '6px', padding: '12px' }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fca5a5', marginBottom: '6px' }}>
+                        Known Model & Evaluation Limitations:
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.78rem', color: '#e2e8f0', lineHeight: 1.5 }}>
+                        {[...(gnnEvalReport?.known_limitations || []), ...(rlEvalReport?.known_limitations || [])].map((lim, i) => (
+                          <li key={i}>{lim}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Loading RL evaluation report...</div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -736,3 +1140,4 @@ export function GnnAnalysisPage() {
     </div>
   )
 }
+

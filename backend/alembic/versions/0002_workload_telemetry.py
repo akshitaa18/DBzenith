@@ -16,9 +16,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # pg_stat_statements must be loaded by PostgreSQL at startup; the Compose
-    # service enables it with shared_preload_libraries.
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+    bind = op.get_bind()
+    json_type = JSONB() if bind.dialect.name == "postgresql" else sa.JSON()
+    if bind.dialect.name == "postgresql":
+        # pg_stat_statements must be loaded by PostgreSQL at startup; the Compose
+        # service enables it with shared_preload_libraries.
+        op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
     op.create_table(
         "workload_snapshots",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -58,8 +61,8 @@ def upgrade() -> None:
         sa.Column("blk_read_time_ms", sa.Float(), nullable=False, server_default="0"),
         sa.Column("blk_write_time_ms", sa.Float(), nullable=False, server_default="0"),
         sa.Column("query_frequency_per_minute", sa.Float(), nullable=False, server_default="0"),
-        sa.Column("predicate_info", JSONB()),
-        sa.Column("explain_plan", JSONB()),
+        sa.Column("predicate_info", json_type),
+        sa.Column("explain_plan", json_type),
     )
     op.create_index("ix_query_statistics_snapshot_id", "query_statistics", ["snapshot_id"])
     op.create_index("ix_query_statistics_query_id", "query_statistics", ["query_id"])

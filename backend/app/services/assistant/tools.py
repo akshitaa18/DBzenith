@@ -172,14 +172,15 @@ class ControlledDBATools:
         self._authorize(ControlledToolName.GET_RECOMMENDATIONS)
 
         from app.services.recommendations.engine import RecommendationEngine
-        # Deterministic generation from current telemetry
+        # Deterministic generation from current telemetry when no pending recommendations exist
         try:
-            RecommendationEngine().generate(self.db)
+            if self.db.query(OptimizationRecommendation).filter(OptimizationRecommendation.status == "pending").count() == 0:
+                RecommendationEngine().generate(self.db)
         except Exception:
             pass
 
         query = self.db.query(OptimizationRecommendation).filter(OptimizationRecommendation.status == "pending")
-        all_pending = query.order_by(OptimizationRecommendation.created_at.desc()).limit(10).all()
+        all_pending = query.order_by(OptimizationRecommendation.created_at.desc(), OptimizationRecommendation.id.asc()).limit(10).all()
 
         if query_id is not None:
             qid_str = str(query_id)

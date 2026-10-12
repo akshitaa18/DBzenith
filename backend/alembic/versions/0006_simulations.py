@@ -15,6 +15,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    json_type = JSONB() if bind.dialect.name == "postgresql" else sa.JSON()
     op.create_table(
         "optimization_simulations",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -24,15 +26,15 @@ def upgrade() -> None:
         sa.Column("baseline_cost", sa.Float(), nullable=True),
         sa.Column("proposed_cost", sa.Float(), nullable=True),
         sa.Column("improvement", sa.Float(), nullable=True),
-        sa.Column("affected_queries", JSONB(), nullable=False),
-        sa.Column("plan_differences", JSONB(), nullable=False),
-        sa.Column("estimated_storage_impact", JSONB(), nullable=False),
-        sa.Column("write_overhead_estimate", JSONB(), nullable=False),
+        sa.Column("affected_queries", json_type, nullable=False),
+        sa.Column("plan_differences", json_type, nullable=False),
+        sa.Column("estimated_storage_impact", json_type, nullable=False),
+        sa.Column("write_overhead_estimate", json_type, nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
-        sa.Column("limitations", JSONB(), nullable=False),
-        sa.Column("benchmark", JSONB(), nullable=False),
-        sa.Column("baseline_plans", JSONB(), nullable=False),
-        sa.Column("proposed_plans", JSONB(), nullable=False),
+        sa.Column("limitations", json_type, nullable=False),
+        sa.Column("benchmark", json_type, nullable=False),
+        sa.Column("baseline_plans", json_type, nullable=False),
+        sa.Column("proposed_plans", json_type, nullable=False),
         sa.Column("error", sa.Text(), nullable=True),
     )
     op.create_index("ix_optimization_simulations_created_at", "optimization_simulations", ["created_at"])

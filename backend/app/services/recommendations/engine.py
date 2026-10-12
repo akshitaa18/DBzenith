@@ -13,6 +13,7 @@ from app.models.recommendation import OptimizationRecommendation
 from app.models.workload import QueryStatistic
 from app.services.recommendations.base import Recommendation
 from app.services.recommendations.index import IndexAdvisor
+from app.services.recommendations.index_portfolio import IndexPortfolioAdvisor
 from app.services.recommendations.join import JoinStrategyAdvisor
 from app.services.recommendations.partition import PartitionAdvisor
 from app.services.recommendations.query_rewrite import QueryRewriteAdvisor
@@ -21,6 +22,7 @@ from app.services.recommendations.query_rewrite import QueryRewriteAdvisor
 class RecommendationEngine:
     def __init__(self) -> None:
         self.index = IndexAdvisor()
+        self.portfolio = IndexPortfolioAdvisor()
         self.partition = PartitionAdvisor()
         self.rewrite = QueryRewriteAdvisor()
         self.join = JoinStrategyAdvisor()
@@ -37,6 +39,8 @@ class RecommendationEngine:
         is_pg = db.bind is None or db.bind.dialect.name == "postgresql"
         recs: list[Recommendation] = []
         recs.extend(self.index.advise(db, limit))
+        if queries:
+            recs.extend(self.portfolio.to_recommendations(db, limit=25))
         recs.extend(self.partition.advise(queries))
         recs.extend(self.rewrite.advise(queries, validate_sandbox=is_pg))
         recs.extend(self.join.advise(queries))

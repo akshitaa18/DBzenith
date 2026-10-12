@@ -15,6 +15,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    json_type = JSONB() if bind.dialect.name == "postgresql" else sa.JSON()
     op.create_table(
         "optimization_recommendations",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -25,11 +27,11 @@ def upgrade() -> None:
         sa.Column("target", sa.Text(), nullable=False),
         sa.Column("proposed_change", sa.Text(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
-        sa.Column("evidence", JSONB(), nullable=False),
+        sa.Column("evidence", json_type, nullable=False),
         sa.Column("expected_benefit", sa.Text(), nullable=False),
         sa.Column("risk", sa.Text(), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
-        sa.Column("affected_queries", JSONB(), nullable=False),
+        sa.Column("affected_queries", json_type, nullable=False),
         sa.Column("requires_approval", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="pending"),
     )

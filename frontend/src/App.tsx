@@ -15,6 +15,8 @@ import { DbaAssistantPage } from './pages/DbaAssistantPage'
 import { SystemHealthPage } from './pages/SystemHealth'
 import { AuditLogsPage } from './pages/AuditLogsPage'
 import { UserAdminPage } from './pages/UserAdminPage'
+import { IndexPortfolioPage } from './pages/IndexPortfolioPage'
+import { WorkloadAlertsPage } from './pages/WorkloadAlertsPage'
 
 export function App() {
   return (
@@ -41,6 +43,10 @@ export function App() {
           <Route path="gnn" element={<GnnAnalysisPage />} />
           {/* 6. Recommendations */}
           <Route path="recommendations" element={<RecommendationsPage />} />
+          {/* 6b. Index Portfolio Advisor */}
+          <Route path="index-portfolio" element={<IndexPortfolioPage />} />
+          {/* 6c. Workload Regression Alerts */}
+          <Route path="alerts" element={<WorkloadAlertsPage />} />
           {/* 7. Simulations */}
           <Route path="simulations" element={<SimulationsPage />} />
           {/* 8. Approval Center */}

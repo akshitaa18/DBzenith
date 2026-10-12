@@ -3,13 +3,42 @@ import os
 import pytest
 from sqlalchemy import create_engine, text
 
-from app.db.session import get_session_factory
+from app.core.config import get_settings
+from app.db.session import get_engine, get_sandbox_engine, get_session_factory
 from app.models.recommendation import OptimizationRecommendation
+from app.models.simulation import OptimizationSimulation
 from app.models.workload import QueryStatistic, WorkloadSnapshot
 from app.services.sandbox.simulator import SandboxSimulator
 
 PRODUCTION_URL = os.getenv("DBZENITH_INTEGRATION_DATABASE_URL")
 SANDBOX_URL = os.getenv("DBZENITH_INTEGRATION_SANDBOX_URL") or os.getenv("SANDBOX_DATABASE_URL")
+
+
+@pytest.fixture(autouse=True)
+def configure_integration_db():
+    prev_db = os.environ.get("DATABASE_URL")
+    prev_sb = os.environ.get("SANDBOX_DATABASE_URL")
+    if PRODUCTION_URL:
+        os.environ["DATABASE_URL"] = PRODUCTION_URL
+    if SANDBOX_URL:
+        os.environ["SANDBOX_DATABASE_URL"] = SANDBOX_URL
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_sandbox_engine.cache_clear()
+    get_session_factory.cache_clear()
+    yield
+    if prev_db is not None:
+        os.environ["DATABASE_URL"] = prev_db
+    else:
+        os.environ.pop("DATABASE_URL", None)
+    if prev_sb is not None:
+        os.environ["SANDBOX_DATABASE_URL"] = prev_sb
+    else:
+        os.environ.pop("SANDBOX_DATABASE_URL", None)
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_sandbox_engine.cache_clear()
+    get_session_factory.cache_clear()
 
 
 def _available(url: str | None) -> bool:
@@ -35,6 +64,11 @@ def test_index_simulation_isolated_from_production():
         conn.execute(text("ANALYZE sandbox_sim_orders"))
 
     with get_session_factory()() as db:
+        existing_rec = db.query(OptimizationRecommendation).filter_by(recommendation_key="sandbox-integration-index").first()
+        if existing_rec is not None:
+            db.query(OptimizationSimulation).filter_by(recommendation_id=existing_rec.id).delete()
+            db.delete(existing_rec)
+            db.commit()
         snapshot = WorkloadSnapshot(window_seconds=30, total_calls=50, total_exec_time_ms=1000, unique_queries=1, slow_queries=0)
         db.add(snapshot)
         db.flush()

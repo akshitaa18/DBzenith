@@ -3,18 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 
-def explain_predictions(predictions: list[dict[str, Any]], graph: Any) -> dict[str, Any]:
-    """Converts GNN node classification predictions into structural evidence and human-readable explanations.
-    
+def explain_predictions(
+    predictions: list[dict[str, Any]],
+    graph: Any,
+    *,
+    is_fallback: bool = False,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Converts GNN or deterministic fallback node classifications into structural evidence and explanations.
+
     Architecture:
-    Execution Plan -> Graph Construction -> GNN (Node Classification) -> Evidence Extraction -> Explanation Layer
+    Execution Plan -> Graph Construction -> GNN / Deterministic Fallback -> Evidence Extraction -> Explanation Layer
     """
     node_diagnoses = []
     flagged_bottlenecks = []
 
     for pred, node_id in zip(predictions, graph.nodes):
         label = pred["label"]
-        conf = float(pred["confidence"])
+        raw_conf = pred.get("confidence")
+        conf: float | None = round(float(raw_conf), 4) if raw_conf is not None and not is_fallback else None
         node = graph.nodes[node_id]
 
         evidence_items: list[str] = []
@@ -81,7 +88,19 @@ def explain_predictions(predictions: list[dict[str, Any]], graph: Any) -> dict[s
             "relation": node.relation,
             "prediction": label,
             "confidence": conf,
-            "probabilities": pred.get("probabilities", {}),
+            "confidence_source": (
+                "none_deterministic_fallback"
+                if is_fallback or conf is None
+                else pred.get("confidence_source", "learned_softmax_probability")
+            ),
+            "source_classification": (
+                "DETERMINISTIC_FALLBACK"
+                if is_fallback
+                else pred.get("source_classification", "LEARNED_MODEL")
+            ),
+            "is_fallback": bool(is_fallback or pred.get("is_fallback", False)),
+            "rule_triggered": pred.get("rule_triggered"),
+            "probabilities": None if is_fallback else pred.get("probabilities", {}),
             "evidence": evidence_items,
             "interpretation": interpretation,
             "recommended_optimization": remediation,
@@ -99,22 +118,43 @@ def explain_predictions(predictions: list[dict[str, Any]], graph: Any) -> dict[s
         if label != "none":
             flagged_bottlenecks.append(diagnosis)
 
-    # Sort flagged bottlenecks by confidence * cost impact
+    # Sort flagged bottlenecks by confidence (when present) and cost impact
     flagged_bottlenecks.sort(
-        key=lambda x: (x["confidence"], x["graph_evidence"]["estimated_cost"]),
+        key=lambda x: (x["confidence"] if x["confidence"] is not None else 0.0, x["graph_evidence"]["estimated_cost"]),
         reverse=True,
     )
 
-    # Generate synthesis summary
+    # Generate synthesis summary without inventing confidence when fallback is used
     if flagged_bottlenecks:
         top = flagged_bottlenecks[0]
-        summary = (
-            f"GNN classified '{top['prediction'].replace('_', ' ')}' on {top['relation'] or top['node_type']} "
-            f"(confidence: {top['confidence']:.0%}) as the dominant bottleneck in the execution graph. "
-            f"{top['interpretation']}"
-        )
+        if is_fallback or top["confidence"] is None:
+            summary = (
+                f"Deterministic rule fallback classified '{top['prediction'].replace('_', ' ')}' on "
+                f"{top['relation'] or top['node_type']} (confidence: N/A — deterministic rule fallback) "
+                f"as the dominant bottleneck in the execution graph. {top['interpretation']}"
+            )
+        else:
+            summary = (
+                f"GNN classified '{top['prediction'].replace('_', ' ')}' on {top['relation'] or top['node_type']} "
+                f"(confidence: {top['confidence']:.0%}) as the dominant bottleneck in the execution graph. "
+                f"{top['interpretation']}"
+            )
     else:
-        summary = "GNN evaluated the graph topology and classified all relational operators within normal execution parameters."
+        if is_fallback:
+            summary = (
+                "Deterministic rule fallback evaluated the graph topology and classified all relational operators "
+                "within normal execution parameters."
+            )
+        else:
+            summary = (
+                "GNN evaluated the graph topology and classified all relational operators within normal execution parameters."
+            )
+
+    stage4_detail = (
+        f"Deterministic rule-based fallback executed ({fallback_reason or 'model artifact unavailable'})"
+        if is_fallback
+        else "Graph Neural Network classifies structural bottleneck patterns"
+    )
 
     return {
         "summary": summary,
@@ -124,9 +164,10 @@ def explain_predictions(predictions: list[dict[str, Any]], graph: Any) -> dict[s
             {"stage": 1, "name": "Execution Plan", "detail": "PostgreSQL EXPLAIN plan extracted without raw customer data"},
             {"stage": 2, "name": "Privacy Gateway", "detail": "Mandatory parameter sanitization (raw-data exposure = 0)"},
             {"stage": 3, "name": "Graph Construction", "detail": "Operators parsed into directed plan graph nodes and edges"},
-            {"stage": 4, "name": "GNN Inference", "detail": "Graph Neural Network classifies structural bottleneck patterns"},
+            {"stage": 4, "name": "Deterministic Fallback" if is_fallback else "GNN Inference", "detail": stage4_detail},
             {"stage": 5, "name": "Evidence Extraction", "detail": "Deterministic extraction of cardinalities, costs, and loop counts"},
             {"stage": 6, "name": "Explanation Layer", "detail": "Translates structural predictions and evidence into DBA actionable recommendations"},
         ],
     }
+
 

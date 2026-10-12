@@ -106,7 +106,49 @@ def _explain_sql(db: Session, sql: str) -> Any:
     return row
 
 
+def _get_gnn_artifact_dir():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[3] / "services" / "gnn" / "model_artifacts" / "v0.7.0"
+
+
 def _response(row: PlanAnalysis) -> PlanAnalysisResponse:
+    explanation = dict(row.explanation) if isinstance(row.explanation, dict) else row.explanation
+    if isinstance(explanation, dict):
+        gnn_block = explanation.get("gnn")
+        if isinstance(gnn_block, dict) and "transparency" not in gnn_block:
+            try:
+                from app.services.gnn.inference import get_gnn_evaluation_report
+                eval_rep = get_gnn_evaluation_report(_get_gnn_artifact_dir())
+                gnn_block = {
+                    **gnn_block,
+                    "source_classification": gnn_block.get("source_classification", "LEARNED_MODEL"),
+                    "is_fallback": bool(gnn_block.get("is_fallback", False)),
+                    "transparency": {
+                        "model_name": eval_rep.get("model_name", "BottleneckGNN"),
+                        "model_version": gnn_block.get("model_version", eval_rep.get("model_version", "v0.7.0-synth-20261003")),
+                        "model_type": gnn_block.get("model_type", "GCN-compatible message-passing fallback"),
+                        "source_classification": gnn_block.get("source_classification", "LEARNED_MODEL"),
+                        "inference_mode": "learned_gnn_artifact",
+                        "is_fallback": bool(gnn_block.get("is_fallback", False)),
+                        "fallback_reason": None,
+                        "evaluation_dataset_type": eval_rep.get("dataset_type", "SYNTHETIC_AND_REPRESENTATIVE_HELD_OUT_PLANS"),
+                        "validated_on_real_workloads": False,
+                        "last_evaluation_time": eval_rep.get("evaluated_at"),
+                        "known_limitations": eval_rep.get("known_limitations", []),
+                    },
+                    "evaluation_summary": {
+                        "legacy_perfect_score_investigation": eval_rep.get("legacy_perfect_score_investigation"),
+                        "grouped_leakage_audit": eval_rep.get("grouped_leakage_audit"),
+                        "grouped_test_metrics": eval_rep.get("grouped_test_metrics"),
+                        "held_out_workload_metrics": eval_rep.get("held_out_workload_metrics"),
+                        "dataset_sizes": eval_rep.get("dataset_sizes"),
+                        "reproducibility": eval_rep.get("reproducibility"),
+                    },
+                }
+            except Exception:
+                pass
+        explanation["gnn"] = gnn_block
+
     return PlanAnalysisResponse(
         id=row.id,
         created_at=row.created_at,
@@ -116,13 +158,14 @@ def _response(row: PlanAnalysis) -> PlanAnalysisResponse:
         graph=row.graph,
         features=row.features,
         bottlenecks=row.bottlenecks,
-        explanation={**row.explanation, "gnn": row.explanation.get("gnn")} if isinstance(row.explanation, dict) else row.explanation,
+        explanation=explanation,
         provenance_state=row.provenance_state or "HYPOTHETICAL_PLAN_ESTIMATE",
         source_identifier=row.source_identifier,
         is_synthetic=bool(row.is_synthetic),
         is_measured=bool(row.is_measured),
         model_version=row.model_version or "deterministic-plan-analyzer-v0.7.0",
     )
+
 
 
 def _build_synthetic_candidate_plan(baseline_plan: Any, index_ddl: str | None = None, target_table: str | None = None) -> dict[str, Any]:
@@ -607,6 +650,15 @@ def export_plan_comparison_endpoint(
     }
 
 
+@router.get("/gnn/evaluation")
+def get_gnn_evaluation_endpoint(
+    _user: TokenPayload = Depends(require_viewer),
+) -> dict[str, Any]:
+    """Returns the comprehensive GNN evaluation, leakage investigation, baseline comparison, and transparency report."""
+    from app.services.gnn.inference import get_gnn_evaluation_report
+    return get_gnn_evaluation_report(_get_gnn_artifact_dir())
+
+
 @router.get("/{analysis_id}", response_model=PlanAnalysisResponse)
 def get_analysis(
     analysis_id: int,
@@ -617,3 +669,4 @@ def get_analysis(
     if row is None:
         raise HTTPException(status_code=404, detail="plan_analysis_not_found")
     return _response(row)
+

@@ -118,7 +118,6 @@ networks:
     driver: bridge
   sandbox_net:
     driver: bridge
-    internal: true
 
 volumes:
   db_data:

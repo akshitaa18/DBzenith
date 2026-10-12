@@ -15,17 +15,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    json_type = JSONB() if bind.dialect.name == "postgresql" else sa.JSON()
     op.create_table(
         "plan_analyses",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("query_id", sa.BigInteger(), nullable=True),
         sa.Column("structural_hash", sa.String(length=64), nullable=False),
-        sa.Column("sanitized_plan", JSONB(), nullable=False),
-        sa.Column("graph", JSONB(), nullable=False),
-        sa.Column("features", JSONB(), nullable=False),
-        sa.Column("bottlenecks", JSONB(), nullable=False),
-        sa.Column("explanation", JSONB(), nullable=False),
+        sa.Column("sanitized_plan", json_type, nullable=False),
+        sa.Column("graph", json_type, nullable=False),
+        sa.Column("features", json_type, nullable=False),
+        sa.Column("bottlenecks", json_type, nullable=False),
+        sa.Column("explanation", json_type, nullable=False),
     )
     op.create_index("ix_plan_analyses_created_at", "plan_analyses", ["created_at"])
     op.create_index("ix_plan_analyses_query_id", "plan_analyses", ["query_id"])

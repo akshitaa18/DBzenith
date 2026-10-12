@@ -12,6 +12,8 @@ from app.api.v1.routes.assistant import router as assistant_router
 
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.audit import router as audit_router
+from app.api.v1.routes.index_portfolio import router as index_portfolio_router
+from app.api.v1.routes.alerts import router as alerts_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -19,6 +21,8 @@ api_router.include_router(audit_router)
 api_router.include_router(health_router)
 api_router.include_router(queries_router)
 api_router.include_router(recommendations_router)
+api_router.include_router(index_portfolio_router)
+api_router.include_router(alerts_router)
 api_router.include_router(simulations_router)
 api_router.include_router(plans_router)
 api_router.include_router(workload_router)

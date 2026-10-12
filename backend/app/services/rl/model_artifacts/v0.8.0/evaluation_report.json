@@ -1,0 +1,542 @@
+{
+  "model_name": "DBZenith DQN Optimization Policy",
+  "model_version": "v0.8.0",
+  "evaluation_version": "phase9-rl-eval-v1",
+  "evaluated_at": "2026-10-12T16:47:31.092706+00:00",
+  "dataset_type": "SYNTHETIC_SANDBOX_SIMULATION_AND_MULTI_REGIME_OOD_WORKLOAD",
+  "validated_on_real_workloads": false,
+  "reproducibility": {
+    "evaluation_seed": 20000,
+    "python_version": "3.14.5",
+    "torch_version": "2.14.1+cpu",
+    "numpy_version": "2.5.3",
+    "state_dim": 38,
+    "action_dim": 6,
+    "artifact_sha256_prefix": "a732f8cbd667e7f0",
+    "metrics_reproducible_from_saved_predictions": true
+  },
+  "training_regression_investigation": {
+    "artifact_found": true,
+    "recorded_total_regressions": 303,
+    "recorded_total_training_steps": 2221,
+    "recorded_training_regression_rate_pct": 13.64,
+    "recorded_action_counts": {
+      "NO_OP": 225,
+      "CREATE_INDEX": 238,
+      "DROP_INDEX": 228,
+      "REWRITE_QUERY": 464,
+      "PARTITION_TABLE": 846,
+      "CHANGE_JOIN_STRATEGY": 220
+    },
+    "partition_table_selection_share_pct": 38.09,
+    "root_causes": [
+      "During the 150-episode training run (2221 total steps), epsilon decayed slowly from 1.0 to 0.2997 (decay=0.992 per episode). Exploratory actions selected DROP_INDEX 228 times and CHANGE_JOIN_STRATEGY 220 times; whenever redundant_index_count==0 (~50% of initial states) or nested_loop_fraction<=0.2, the sandbox simulator penalized those actions as -60% and -12% latency regressions, accumulating 303 training regression events.",
+      "In DatabaseOptimizationEnv._generate_initial_state(), total_db_size_mb was sampled exclusively from Uniform(400, 1200) > 300 MB, and _transition_state() never updated total_db_size_mb after PARTITION_TABLE. Consequently, PARTITION_TABLE yielded +25%..+45% reward unconditionally on every training state (846/2221 steps = 38.1%), causing the greedy Q-network to collapse to PARTITION_TABLE even on out-of-distribution small tables (<= 300 MB) where partitioning causes a -10% regression.",
+      "DEFAULT_ARTIFACT_DIR in persistence.py previously pointed to 'ai/rl/models/v0.8.0' instead of 'backend/app/services/rl/model_artifacts/v0.8.0', causing RLInferenceService to silently fall back to BaselinePolicy at runtime unless explicitly given the artifact path."
+    ]
+  },
+  "held_out_in_distribution_comparison": {
+    "rl_agent": {
+      "policy_name": "dqn_optimization_agent",
+      "num_episodes": 50,
+      "total_actions": 1000,
+      "mean_reward": 23.96,
+      "std_reward": 9.022,
+      "reward_stability": {
+        "mean_reward": 23.96,
+        "std_reward": 9.022,
+        "median_reward": 27.877,
+        "iqr_reward": 16.012,
+        "min_reward": 4.635,
+        "max_reward": 35.868
+      },
+      "valid_action_rate_pct": 100.0,
+      "regression_rate_pct": 0.0,
+      "regression_frequency_pct": 0.0,
+      "failure_rate_pct": 0.0,
+      "mean_latency_improvement_pct": 25.17,
+      "mean_throughput_improvement_pct": 38.29,
+      "improvement_distribution": {
+        "latency_improvement_pct": {
+          "p10": 0.0,
+          "p25": 17.867,
+          "p50_median": 29.07,
+          "p75": 35.422,
+          "p90": 41.27,
+          "mean": 25.174,
+          "std": 14.435,
+          "iqr": 17.555,
+          "min": 0.0,
+          "max": 52.38
+        },
+        "throughput_improvement_pct": {
+          "p10": 0.0,
+          "p25": 21.755,
+          "p50_median": 40.98,
+          "p75": 54.847,
+          "p90": 70.28,
+          "mean": 38.288,
+          "std": 24.464,
+          "iqr": 33.092,
+          "min": 0.0,
+          "max": 109.99
+        }
+      },
+      "mean_storage_delta_mb": 2.74,
+      "mean_write_overhead": 0.126,
+      "mean_cpu_delta_pct": -9.04,
+      "action_distribution": {
+        "NO_OP": 201,
+        "CREATE_INDEX": 12,
+        "DROP_INDEX": 2,
+        "REWRITE_QUERY": 287,
+        "PARTITION_TABLE": 496,
+        "CHANGE_JOIN_STRATEGY": 2
+      }
+    },
+    "baseline_policy": {
+      "policy_name": "rule_based_baseline",
+      "num_episodes": 50,
+      "total_actions": 1000,
+      "mean_reward": 23.522,
+      "std_reward": 8.26,
+      "reward_stability": {
+        "mean_reward": 23.522,
+        "std_reward": 8.26,
+        "median_reward": 26.146,
+        "iqr_reward": 3.457,
+        "min_reward": 2.323,
+        "max_reward": 31.497
+      },
+      "valid_action_rate_pct": 100.0,
+      "regression_rate_pct": 0.0,
+      "regression_frequency_pct": 0.0,
+      "failure_rate_pct": 0.0,
+      "mean_latency_improvement_pct": 22.43,
+      "mean_throughput_improvement_pct": 31.29,
+      "improvement_distribution": {
+        "latency_improvement_pct": {
+          "p10": 0.0,
+          "p25": 17.572,
+          "p50_median": 24.265,
+          "p75": 30.502,
+          "p90": 33.691,
+          "mean": 22.433,
+          "std": 10.775,
+          "iqr": 12.93,
+          "min": 0.0,
+          "max": 56.09
+        },
+        "throughput_improvement_pct": {
+          "p10": 0.0,
+          "p25": 21.317,
+          "p50_median": 32.04,
+          "p75": 43.895,
+          "p90": 50.813,
+          "mean": 31.293,
+          "std": 17.415,
+          "iqr": 22.577,
+          "min": 0.0,
+          "max": 127.73
+        }
+      },
+      "mean_storage_delta_mb": 1.05,
+      "mean_write_overhead": 0.01,
+      "mean_cpu_delta_pct": -10.9,
+      "action_distribution": {
+        "NO_OP": 122,
+        "CREATE_INDEX": 58,
+        "DROP_INDEX": 17,
+        "REWRITE_QUERY": 786,
+        "PARTITION_TABLE": 2,
+        "CHANGE_JOIN_STRATEGY": 15
+      }
+    },
+    "no_change_policy": {
+      "policy_name": "no_op_baseline",
+      "num_episodes": 50,
+      "total_actions": 1000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "reward_stability": {
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "median_reward": 0.0,
+        "iqr_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0
+      },
+      "valid_action_rate_pct": 100.0,
+      "regression_rate_pct": 0.0,
+      "regression_frequency_pct": 0.0,
+      "failure_rate_pct": 0.0,
+      "mean_latency_improvement_pct": 0.0,
+      "mean_throughput_improvement_pct": 0.0,
+      "improvement_distribution": {
+        "latency_improvement_pct": {
+          "p10": 0.0,
+          "p25": 0.0,
+          "p50_median": 0.0,
+          "p75": 0.0,
+          "p90": 0.0,
+          "mean": 0.0,
+          "std": 0.0,
+          "iqr": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "throughput_improvement_pct": {
+          "p10": 0.0,
+          "p25": 0.0,
+          "p50_median": 0.0,
+          "p75": 0.0,
+          "p90": 0.0,
+          "mean": 0.0,
+          "std": 0.0,
+          "iqr": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      },
+      "mean_storage_delta_mb": 0.0,
+      "mean_write_overhead": 0.0,
+      "mean_cpu_delta_pct": 0.0,
+      "action_distribution": {
+        "NO_OP": 1000,
+        "CREATE_INDEX": 0,
+        "DROP_INDEX": 0,
+        "REWRITE_QUERY": 0,
+        "PARTITION_TABLE": 0,
+        "CHANGE_JOIN_STRATEGY": 0
+      }
+    },
+    "random_policy": {
+      "policy_name": "random_baseline",
+      "num_episodes": 50,
+      "total_actions": 865,
+      "mean_reward": -17.581,
+      "std_reward": 12.063,
+      "reward_stability": {
+        "mean_reward": -17.581,
+        "std_reward": 12.063,
+        "median_reward": -19.204,
+        "iqr_reward": 17.826,
+        "min_reward": -39.3,
+        "max_reward": 13.848
+      },
+      "valid_action_rate_pct": 52.72,
+      "regression_rate_pct": 28.9,
+      "regression_frequency_pct": 28.9,
+      "failure_rate_pct": 28.9,
+      "mean_latency_improvement_pct": 3.65,
+      "mean_throughput_improvement_pct": 14.76,
+      "improvement_distribution": {
+        "latency_improvement_pct": {
+          "p10": -60.0,
+          "p25": -12.0,
+          "p50_median": 13.44,
+          "p75": 28.91,
+          "p90": 37.008,
+          "mean": 3.653,
+          "std": 32.64,
+          "iqr": 40.91,
+          "min": -60.0,
+          "max": 56.09
+        },
+        "throughput_improvement_pct": {
+          "p10": -37.5,
+          "p25": -10.71,
+          "p50_median": 15.53,
+          "p75": 40.68,
+          "p90": 58.752,
+          "mean": 14.756,
+          "std": 34.149,
+          "iqr": 51.39,
+          "min": -37.5,
+          "max": 127.73
+        }
+      },
+      "mean_storage_delta_mb": 1.98,
+      "mean_write_overhead": 0.069,
+      "mean_cpu_delta_pct": -3.27,
+      "action_distribution": {
+        "NO_OP": 145,
+        "CREATE_INDEX": 151,
+        "DROP_INDEX": 157,
+        "REWRITE_QUERY": 136,
+        "PARTITION_TABLE": 135,
+        "CHANGE_JOIN_STRATEGY": 141
+      }
+    },
+    "markdown_table": "| Metric | Trainable RL (DQN) | DBA Heuristic Baseline | No-Change Baseline | Random Policy |\n|---|---:|---:|---:|---:|\n| Mean Episode Return | **23.96** | 23.522 | 0.0 | -17.581 |\n| Valid Action Rate (%) | **100.0%** | 100.0% | 100.0% | 52.72% |\n| Mean Latency Impr. (%) | **+25.17%** | +22.43% | +0.0% | 3.65% |\n| Mean Throughput Impr. (%) | **+38.29%** | +31.29% | +0.0% | 14.76% |\n| Regression Frequency (%) | **0.0%** | 0.0% | 0.0% | 28.9% |\n| Failure Rate (%) | **0.0%** | 0.0% | 0.0% | 28.9% |\n"
+  },
+  "diverse_multi_regime_evaluation": {
+    "scenario_count": 24,
+    "regimes_covered": [
+      "active_regression_hold",
+      "already_optimal_oltp",
+      "high_seq_scan_unindexed",
+      "large_table_analytical",
+      "redundant_index_bloat",
+      "small_table_nested_loop_ood"
+    ],
+    "policy_summaries": {
+      "raw_dqn_agent": {
+        "total_actions": 24,
+        "valid_action_rate_pct": 62.5,
+        "regression_frequency_pct": 4.17,
+        "failure_rate_pct": 4.17,
+        "mean_reward": 1.028,
+        "std_reward": 1.263,
+        "reward_stability": {
+          "mean_reward": 1.028,
+          "std_reward": 1.263,
+          "median_reward": 1.233,
+          "iqr_reward": 0.557,
+          "min_reward": -4.82,
+          "max_reward": 1.891
+        },
+        "improvement_distribution": {
+          "latency_improvement_pct": {
+            "p10": 16.611,
+            "p25": 21.145,
+            "p50_median": 24.025,
+            "p75": 28.715,
+            "p90": 31.278,
+            "mean": 23.248,
+            "std": 8.562,
+            "iqr": 7.57,
+            "min": -10.0,
+            "max": 33.48
+          },
+          "throughput_improvement_pct": {
+            "p10": 19.926,
+            "p25": 26.837,
+            "p50_median": 31.625,
+            "p75": 40.325,
+            "p90": 45.514,
+            "mean": 31.64,
+            "std": 12.33,
+            "iqr": 13.488,
+            "min": -9.09,
+            "max": 50.34
+          }
+        },
+        "action_distribution": {
+          "NO_OP": 0,
+          "CREATE_INDEX": 0,
+          "DROP_INDEX": 0,
+          "REWRITE_QUERY": 21,
+          "PARTITION_TABLE": 1,
+          "CHANGE_JOIN_STRATEGY": 2
+        }
+      },
+      "safety_gated_dqn_agent": {
+        "total_actions": 24,
+        "valid_action_rate_pct": 100.0,
+        "regression_frequency_pct": 0.0,
+        "failure_rate_pct": 0.0,
+        "mean_reward": 0.911,
+        "std_reward": 0.713,
+        "reward_stability": {
+          "mean_reward": 0.911,
+          "std_reward": 0.713,
+          "median_reward": 1.055,
+          "iqr_reward": 1.548,
+          "min_reward": 0.0,
+          "max_reward": 1.891
+        },
+        "improvement_distribution": {
+          "latency_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 21.86,
+            "p75": 28.715,
+            "p90": 31.413,
+            "mean": 17.366,
+            "std": 13.14,
+            "iqr": 28.715,
+            "min": 0.0,
+            "max": 33.71
+          },
+          "throughput_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 27.975,
+            "p75": 40.325,
+            "p90": 45.803,
+            "mean": 24.013,
+            "std": 18.944,
+            "iqr": 40.325,
+            "min": 0.0,
+            "max": 50.85
+          }
+        },
+        "action_distribution": {
+          "NO_OP": 8,
+          "CREATE_INDEX": 0,
+          "DROP_INDEX": 0,
+          "REWRITE_QUERY": 13,
+          "PARTITION_TABLE": 0,
+          "CHANGE_JOIN_STRATEGY": 3
+        }
+      },
+      "rule_based_baseline": {
+        "total_actions": 24,
+        "valid_action_rate_pct": 100.0,
+        "regression_frequency_pct": 0.0,
+        "failure_rate_pct": 0.0,
+        "mean_reward": 0.893,
+        "std_reward": 0.946,
+        "reward_stability": {
+          "mean_reward": 0.893,
+          "std_reward": 0.946,
+          "median_reward": 0.483,
+          "iqr_reward": 1.551,
+          "min_reward": 0.0,
+          "max_reward": 3.291
+        },
+        "improvement_distribution": {
+          "latency_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 10.31,
+            "p75": 31.127,
+            "p90": 37.049,
+            "mean": 16.732,
+            "std": 16.667,
+            "iqr": 31.127,
+            "min": 0.0,
+            "max": 54.35
+          },
+          "throughput_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 11.885,
+            "p75": 45.188,
+            "p90": 59.047,
+            "mean": 25.991,
+            "std": 30.305,
+            "iqr": 45.188,
+            "min": 0.0,
+            "max": 119.05
+          }
+        },
+        "action_distribution": {
+          "NO_OP": 8,
+          "CREATE_INDEX": 4,
+          "DROP_INDEX": 4,
+          "REWRITE_QUERY": 4,
+          "PARTITION_TABLE": 0,
+          "CHANGE_JOIN_STRATEGY": 4
+        }
+      },
+      "no_op_baseline": {
+        "total_actions": 24,
+        "valid_action_rate_pct": 100.0,
+        "regression_frequency_pct": 0.0,
+        "failure_rate_pct": 0.0,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "reward_stability": {
+          "mean_reward": 0.0,
+          "std_reward": 0.0,
+          "median_reward": 0.0,
+          "iqr_reward": 0.0,
+          "min_reward": 0.0,
+          "max_reward": 0.0
+        },
+        "improvement_distribution": {
+          "latency_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 0.0,
+            "p75": 0.0,
+            "p90": 0.0,
+            "mean": 0.0,
+            "std": 0.0,
+            "iqr": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "throughput_improvement_pct": {
+            "p10": 0.0,
+            "p25": 0.0,
+            "p50_median": 0.0,
+            "p75": 0.0,
+            "p90": 0.0,
+            "mean": 0.0,
+            "std": 0.0,
+            "iqr": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          }
+        },
+        "action_distribution": {
+          "NO_OP": 24,
+          "CREATE_INDEX": 0,
+          "DROP_INDEX": 0,
+          "REWRITE_QUERY": 0,
+          "PARTITION_TABLE": 0,
+          "CHANGE_JOIN_STRATEGY": 0
+        }
+      },
+      "random_baseline": {
+        "total_actions": 24,
+        "valid_action_rate_pct": 70.83,
+        "regression_frequency_pct": 20.83,
+        "failure_rate_pct": 20.83,
+        "mean_reward": -0.527,
+        "std_reward": 3.0,
+        "reward_stability": {
+          "mean_reward": -0.527,
+          "std_reward": 3.0,
+          "median_reward": 0.521,
+          "iqr_reward": 1.357,
+          "min_reward": -7.032,
+          "max_reward": 3.291
+        },
+        "improvement_distribution": {
+          "latency_improvement_pct": {
+            "p10": -45.6,
+            "p25": 0.0,
+            "p50_median": 14.495,
+            "p75": 28.172,
+            "p90": 31.159,
+            "mean": 6.141,
+            "std": 29.455,
+            "iqr": 28.172,
+            "min": -60.0,
+            "max": 54.35
+          },
+          "throughput_improvement_pct": {
+            "p10": -29.463,
+            "p25": 0.0,
+            "p50_median": 16.975,
+            "p75": 39.225,
+            "p90": 45.255,
+            "mean": 16.197,
+            "std": 33.64,
+            "iqr": 39.225,
+            "min": -37.5,
+            "max": 119.05
+          }
+        },
+        "action_distribution": {
+          "NO_OP": 6,
+          "CREATE_INDEX": 5,
+          "DROP_INDEX": 3,
+          "REWRITE_QUERY": 8,
+          "PARTITION_TABLE": 1,
+          "CHANGE_JOIN_STRATEGY": 1
+        }
+      }
+    }
+  },
+  "known_limitations": [
+    "Trained and evaluated in a parameterized analytical sandbox environment (DatabaseOptimizationEnv), not against live production PostgreSQL workloads.",
+    "Raw DQN weights (v0.8.0) collapsed toward PARTITION_TABLE due to an unpenalized reward shortcut in the training state generator (total_db_size_mb always > 300 MB).",
+    "Safety-gated inference validates state preconditions before accepting a DQN action and falls back to deterministic DBA heuristics (BaselinePolicy) when the raw DQN proposes an OOD/unsafe action.",
+    "RL outputs are advisory proposals only and cannot directly authorize or execute production DDL/DML changes."
+  ]
+}

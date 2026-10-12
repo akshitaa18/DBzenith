@@ -22,18 +22,25 @@ def analyze_plan(raw_plan: RawPlan | SanitizedPlan) -> dict:
     explanation = explain(features, bottlenecks)
     learned = None
     model_dir = Path(__file__).resolve().parent.parent / "gnn" / "model_artifacts" / "v0.7.0"
-    if not (model_dir / "gnn.pt").exists():
+    if not model_dir.exists():
         model_dir = Path(__file__).resolve().parents[2] / "services" / "gnn" / "model_artifacts" / "v0.7.0"
-    if gnn_infer is not None and (model_dir / "gnn.pt").exists():
+    if gnn_infer is not None:
         try:
-            learned = gnn_infer(graph, model_dir)
+            learned = gnn_infer(graph, model_dir, allow_fallback=True)
         except Exception:
             learned = None
     if learned is not None:
         explanation["gnn_summary"] = learned.get("summary")
         explanation["flagged_bottlenecks"] = learned.get("flagged_bottlenecks", [])
         explanation["architecture_flow"] = learned.get("architecture_flow", [])
-        explanation["method"] = f"GNN classification ({learned.get('model_type', 'GCN')}) + deterministic explanation layer"
+        explanation["source_classification"] = learned.get("source_classification", "LEARNED_MODEL")
+        explanation["is_fallback"] = bool(learned.get("is_fallback", False))
+        explanation["transparency"] = learned.get("transparency")
+        explanation["method"] = (
+            "Deterministic rule-based fallback + structural explanation layer"
+            if learned.get("is_fallback")
+            else f"GNN classification ({learned.get('model_type', 'GCN')}) + deterministic explanation layer"
+        )
 
     return {
         "sanitized_plan": sanitized,

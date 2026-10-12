@@ -1366,6 +1366,685 @@ describe('DBZenith Authentication, Session & RBAC Suite', () => {
     })
     expect(await screen.findByTestId('validation-results-panel')).toHaveTextContent(/Connection and required extensions verified/i)
   })
+
+  it('Phase 8: Index Portfolio Advisor displays statistics completeness warnings, Candidate Requiring DBA Review labels, overlapping/low-usage/composite proposals, and syncs candidates', async () => {
+    const dbaUser: api.AuthUser = {
+      id: 2,
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+    }
+    api.setAuthSession('dba-token', dbaUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '2',
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+
+    const mockPortfolio: api.IndexPortfolioResponse = {
+      generated_at: '2026-10-12T12:00:00Z',
+      read_only_analysis: true,
+      auto_drop_enabled: false,
+      governance_notice:
+        'All index recommendations are advisory candidates requiring human DBA review. DBZenith never automatically drops or creates indexes in production.',
+      statistics_status: {
+        stats_reset_at: '2026-10-12T11:30:00Z',
+        stats_age_hours: 0.5,
+        stats_recently_reset: true,
+        incomplete_statistics: true,
+        catalog_reachable: true,
+        warnings: ['PostgreSQL statistics were reset 0.5h ago (<24h). Low scan counts do NOT prove an index is unused.'],
+      },
+      summary: {
+        total_indexes: 4,
+        total_index_size_bytes: 18432000,
+        total_index_size_pretty: '17.6 MB',
+        duplicate_or_overlapping_count: 1,
+        low_usage_candidate_count: 1,
+        missing_or_composite_proposals_count: 1,
+        unsupported_index_type_count: 1,
+        reclaimable_bytes_estimate: 10240000,
+        reclaimable_pretty_estimate: '9.8 MB',
+      },
+      pagination: {
+        page: 1,
+        page_size: 20,
+        total_indexes: 4,
+        total_pages: 1,
+      },
+      indexes: [
+        {
+          schema_name: 'public',
+          table_name: 'orders',
+          index_name: 'idx_orders_customer_id',
+          access_method: 'btree',
+          is_unique: false,
+          is_primary: false,
+          key_columns: ['customer_id'],
+          include_columns: [],
+          where_predicate: null,
+          indexdef: 'CREATE INDEX idx_orders_customer_id ON public.orders USING btree (customer_id)',
+          index_size_bytes: 2048000,
+          index_size_pretty: '2.0 MB',
+          table_size_bytes: 50000000,
+          idx_scan: 120,
+          idx_tup_read: 500,
+          idx_tup_fetch: 500,
+          table_writes_total: 15000,
+          usage_classification: 'active',
+          supported_for_prefix_overlap: true,
+          stats_available: true,
+        },
+      ],
+      overlapping_candidates: [
+        {
+          candidate_type: 'overlapping_prefix_index',
+          label: 'Candidate Requiring DBA Review',
+          requires_dba_review: true,
+          auto_drop_permitted: false,
+          schema_name: 'public',
+          table_name: 'orders',
+          index_name: 'idx_orders_customer_id',
+          overlapping_with_index: 'idx_orders_cust_status',
+          access_method: 'btree',
+          narrow_columns: ['customer_id'],
+          covering_columns: ['customer_id', 'status'],
+          where_predicate: null,
+          index_size_bytes: 2048000,
+          index_size_pretty: '2.0 MB',
+          idx_scan: 120,
+          covering_idx_scan: 4500,
+          table_writes_total: 15000,
+          confidence: 0.84,
+          risk_level: 'medium',
+          rationale: 'idx_orders_customer_id is a leading-column prefix of idx_orders_cust_status.',
+          risk_notes: 'Never drop without staging plan verification.',
+          review_sql: '-- CANDIDATE REQUIRING DBA REVIEW\n-- DROP INDEX CONCURRENTLY idx_orders_customer_id;',
+          evidence: {},
+        },
+      ],
+      low_usage_candidates: [
+        {
+          candidate_type: 'low_usage_index_review',
+          label: 'Candidate Requiring DBA Review',
+          requires_dba_review: true,
+          auto_drop_permitted: false,
+          schema_name: 'public',
+          table_name: 'orders',
+          index_name: 'idx_orders_legacy_promo',
+          access_method: 'btree',
+          key_columns: ['promo_code'],
+          index_size_bytes: 8192000,
+          index_size_pretty: '7.8 MB',
+          idx_scan: 0,
+          table_writes_total: 15000,
+          stats_reset_at: '2026-10-12T11:30:00Z',
+          stats_age_hours: 0.5,
+          stats_recently_reset: true,
+          index_age_hours: 120,
+          referenced_in_observed_workload: false,
+          supporting_query_count: 0,
+          supporting_queries: [],
+          confidence: 0.35,
+          risk_level: 'high',
+          rationale: '0 scans observed, but statistics were reset 0.5h ago.',
+          risk_notes: 'Never automatically drop an index merely because usage counters are low.',
+          review_sql: '-- CANDIDATE REQUIRING DBA REVIEW (DO NOT AUTO-DROP)',
+        },
+      ],
+      column_access_analysis: [],
+      missing_index_proposals: [
+        {
+          candidate_type: 'composite_index',
+          label: 'Candidate Requiring DBA Review',
+          requires_dba_review: true,
+          auto_drop_permitted: false,
+          table_name: 'orders',
+          index_name: 'idx_orders_customer_id_order_date',
+          key_columns: ['customer_id', 'order_date'],
+          where_predicate: null,
+          proposed_sql: 'CREATE INDEX CONCURRENTLY idx_orders_customer_id_order_date ON orders (customer_id, order_date);',
+          expected_benefit_pct: 42.5,
+          confidence: 0.85,
+          risk_level: 'low',
+          write_overhead_assessment: 'Moderate table write rate (15,000 tuple writes).',
+          table_writes_total: 15000,
+          existing_table_index_count: 2,
+          selectivity_notes: ['customer_id: high selectivity'],
+          rationale: 'Composite B-tree index places equality filter customer_id before range/sort column order_date.',
+          supporting_query_count: 1,
+          supporting_queries: [
+            {
+              query_id: 501,
+              query_fingerprint: 'fp_orders_cust_date',
+              calls: 250,
+              mean_exec_time_ms: 185.4,
+            },
+          ],
+          catalog_observations: {},
+        },
+      ],
+      unsupported_index_notices: [],
+      provenance_state: 'LIVE_TELEMETRY',
+      source_identifier: 'postgresql://localhost:5432/dbzenith',
+      is_synthetic: false,
+    }
+
+    vi.spyOn(api, 'getIndexPortfolio').mockResolvedValue(mockPortfolio)
+    const analyzeSpy = vi.spyOn(api, 'analyzeIndexPortfolio').mockResolvedValue({
+      status: 'completed',
+      persisted_recommendation_ids: [801],
+      persisted_count: 1,
+      portfolio: mockPortfolio,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/index-portfolio']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('index-portfolio-page')).toBeInTheDocument()
+    expect(screen.getByTestId('stats-completeness-banner')).toHaveTextContent(
+      /Incomplete or Recently Reset PostgreSQL Catalog Statistics Detected/i,
+    )
+    expect(screen.getAllByText(/Candidate Requiring DBA Review/i).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/idx_orders_customer_id is a leading-column prefix/i)).toBeInTheDocument()
+
+    // Switch to Composite & Partial Proposals tab
+    fireEvent.click(screen.getByRole('button', { name: /Composite & Partial Proposals/i }))
+    expect(
+      await screen.findByText(/CREATE INDEX CONCURRENTLY idx_orders_customer_id_order_date/i),
+    ).toBeInTheDocument()
+
+    // Sync candidates to lifecycle
+    fireEvent.click(screen.getByRole('button', { name: /Sync Candidates to Lifecycle/i }))
+    await waitFor(() => {
+      expect(analyzeSpy).toHaveBeenCalledWith(true)
+    })
+    expect(
+      await screen.findByText(/Synced 1 new index candidate\(s\) into the Optimization Lifecycle Tracker/i),
+    ).toBeInTheDocument()
+  })
+
+  it('Phase 8: Workload Regression Alerts renders active/acknowledged/resolved states, insufficient history diagnostics, and DBA acknowledgment/resolution workflow', async () => {
+    const dbaUser: api.AuthUser = {
+      id: 2,
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+    }
+    api.setAuthSession('dba-token', dbaUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '2',
+      username: 'dba_operator',
+      email: 'dba@dbzenith.local',
+      role: 'DBA',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+
+    const mockAlert: api.WorkloadAlertItem = {
+      id: 42,
+      rule_id: 1,
+      rule_name: 'Query Mean Latency Regression',
+      dedup_key: 'rule:1:metric:mean_exec_time_ms:fp:fp_orders_lookup',
+      status: 'active',
+      severity: 'critical',
+      metric_name: 'mean_exec_time_ms',
+      scope: 'query',
+      title: 'Query Mean Latency Regression: fp_orders_lookup (245.0 ms)',
+      summary: 'Query fingerprint fp_orders_lookup rose from baseline 100.0 ms to 245.0 ms (+145.0%) across 2 consecutive observations.',
+      started_at: '2026-10-12T10:00:00Z',
+      last_observed_at: '2026-10-12T10:15:00Z',
+      occurrence_count: 2,
+      consecutive_breaches: 2,
+      baseline_value: 100,
+      current_value: 245,
+      threshold_value: 50,
+      deviation_pct: 145,
+      baseline_sample_count: 3,
+      comparison_sample_count: 2,
+      affected_query_fingerprints: [
+        {
+          query_id: 777,
+          query_fingerprint: 'fp_orders_lookup',
+          normalized_query: 'SELECT * FROM orders WHERE customer_id = $1',
+          calls: 100,
+          mean_exec_time_ms: 245,
+        },
+      ],
+      evidence: {},
+      provenance_state: 'LIVE_TELEMETRY',
+      source_identifier: 'postgresql://localhost:5432/dbzenith',
+      is_synthetic: false,
+      audit_history: [
+        {
+          id: 1,
+          alert_id: 42,
+          rule_id: 1,
+          action: 'triggered',
+          previous_status: null,
+          new_status: 'active',
+          actor_id: 'system',
+          actor_username: 'system:alert_engine',
+          actor_role: 'SYSTEM',
+          reason: 'Breached 50% threshold across 2 consecutive samples.',
+          details: {},
+          created_at: '2026-10-12T10:00:00Z',
+        },
+      ],
+    }
+
+    vi.spyOn(api, 'getWorkloadAlerts').mockResolvedValue({
+      items: [mockAlert],
+      pagination: { page: 1, page_size: 15, total_items: 1, total_pages: 1 },
+      status_counts: { active: 1, acknowledged: 0, resolved: 1, total: 2 },
+      severity_counts: { critical: 1, high: 0, warning: 0, info: 0 },
+      diagnostics: {
+        evaluated_at: '2026-10-12T10:15:00Z',
+        insufficient_history: [
+          {
+            rule_id: 1,
+            rule_name: 'Query Mean Latency Regression',
+            reason_code: 'insufficient_baseline_samples',
+            detail: 'Query fingerprint fp_new_query has 1 observation, fewer than required 3 baseline samples.',
+          },
+        ],
+        suppressed_evaluations: [],
+        unsupported_metrics: [],
+        supported_metrics: {
+          mean_exec_time_ms: {
+            label: 'Mean Execution Latency (ms)',
+            unit: 'ms',
+            scope: ['query', 'workload'],
+            default_operator: 'pct_increase',
+            description: 'Average query execution latency in milliseconds.',
+          },
+        },
+      },
+    })
+    vi.spyOn(api, 'getWorkloadAlertDetail').mockResolvedValue(mockAlert)
+    vi.spyOn(api, 'getAlertRules').mockResolvedValue({
+      items: [],
+      total: 0,
+      supported_metrics: {
+        mean_exec_time_ms: {
+          label: 'Mean Execution Latency (ms)',
+          unit: 'ms',
+          scope: ['query', 'workload'],
+          default_operator: 'pct_increase',
+          description: 'Average query execution latency in milliseconds.',
+        },
+      },
+    })
+    vi.spyOn(api, 'getAlertAuditHistory').mockResolvedValue({
+      items: mockAlert.audit_history || [],
+      pagination: { page: 1, page_size: 40, total_items: 1, total_pages: 1 },
+    })
+
+    const ackSpy = vi.spyOn(api, 'acknowledgeWorkloadAlert').mockResolvedValue({
+      ...mockAlert,
+      status: 'acknowledged',
+      acknowledged_by: 'dba_operator',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/alerts']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByTestId('workload-alerts-page')).toBeInTheDocument()
+    const matches = await screen.findAllByText(/Query Mean Latency Regression: fp_orders_lookup/i)
+    expect(matches.length).toBeGreaterThanOrEqual(1)
+
+    // Acknowledge the active alert
+    fireEvent.change(
+      screen.getByPlaceholderText(/Document investigation note or resolution root cause/i),
+      { target: { value: 'Investigating missing index on orders.customer_id' } },
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Acknowledge Alert/i }))
+    await waitFor(() => {
+      expect(ackSpy).toHaveBeenCalledWith(42, 'Investigating missing index on orders.customer_id')
+    })
+
+    // Switch to Diagnostics tab and verify insufficient history is explicitly surfaced
+    fireEvent.click(screen.getByRole('button', { name: /Insufficient History & Noise Suppression/i }))
+    expect(await screen.findByTestId('insufficient-history-section')).toHaveTextContent(
+      /insufficient_baseline_samples/i,
+    )
+  })
+
+  it('renders Phase 9 GnnAnalysisPage with GNN/RL evaluation reports, leakage audit, provenance classes, and deterministic fallback transparency', async () => {
+    const analystUser: api.AuthUser = {
+      id: 3,
+      username: 'analyst_operator',
+      email: 'analyst@dbzenith.local',
+      role: 'ANALYST',
+    }
+    api.setAuthSession('analyst-token', analystUser, 3600)
+    vi.spyOn(api, 'getCurrentUserProfile').mockResolvedValue({
+      user_id: '3',
+      username: 'analyst_operator',
+      email: 'analyst@dbzenith.local',
+      role: 'ANALYST',
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    })
+
+    vi.spyOn(api, 'getGnnEvaluation').mockResolvedValue({
+      model_name: 'BottleneckGNN',
+      model_version: 'v0.7.0-synth-20261003',
+      evaluation_version: 'phase9-grouped-eval-v1',
+      evaluated_at: '2026-10-12T12:00:00Z',
+      dataset_type: 'SYNTHETIC_AND_REPRESENTATIVE_HELD_OUT_PLANS',
+      validated_on_real_workloads: false,
+      reproducibility: {
+        legacy_seed: 7,
+        evaluation_seed: 202609,
+        python_version: '3.13.0',
+        torch_version: '2.6.0',
+        pyg_available: false,
+        normalizer_version: 1,
+        feature_count: 21,
+        artifact_sha256_prefix: 'a1b2c3d4e5f60718',
+        metrics_reproducible_from_saved_predictions: true,
+      },
+      dataset_sizes: {
+        legacy_synthetic: { total_graphs: 250, train_graphs: 200, validation_graphs: 50, validation_nodes: 80 },
+        grouped_leakage_free: {
+          total_graphs: 288,
+          train_graphs: 192,
+          train_nodes: 564,
+          validation_graphs: 48,
+          validation_nodes: 144,
+          test_graphs: 48,
+          test_nodes: 144,
+          held_out_workload_graphs: 6,
+          held_out_workload_nodes: 15,
+        },
+      },
+      legacy_perfect_score_investigation: {
+        reported_accuracy: 1.0,
+        reported_macro_f1: 1.0,
+        leakage_and_shortcut_audit: { exact_duplicate_node_count: 30 },
+        explanation:
+          '30 of the 80 validation nodes (37.5%) were byte-for-byte identical duplicates of training child nodes and had 1-to-1 operator shortcuts.',
+      },
+      grouped_leakage_audit: { group_id_overlap_count: 0 },
+      grouped_validation_metrics: {
+        gnn: {
+          accuracy: 0.965,
+          macro_precision: 0.96,
+          macro_recall: 0.95,
+          macro_f1: 0.955,
+          weighted_f1: 0.965,
+          total_nodes: 144,
+          per_class: {
+            none: { precision: 0.98, recall: 0.98, f1: 0.98, support: 96 },
+            sequential_scan: { precision: 0.95, recall: 0.95, f1: 0.95, support: 12 },
+          },
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[94, 2], [1, 11]] },
+        },
+      },
+      grouped_test_metrics: {
+        gnn: {
+          accuracy: 0.9722,
+          macro_precision: 0.945,
+          macro_recall: 0.95,
+          macro_f1: 0.9462,
+          weighted_f1: 0.972,
+          total_nodes: 144,
+          per_class: {
+            none: { precision: 0.9896, recall: 0.9896, f1: 0.9896, support: 96 },
+            sequential_scan: { precision: 0.9231, recall: 1.0, f1: 0.96, support: 12 },
+          },
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[95, 1], [0, 12]] },
+        },
+        mlp_baseline: {
+          accuracy: 0.9583,
+          macro_precision: 0.92,
+          macro_recall: 0.93,
+          macro_f1: 0.925,
+          weighted_f1: 0.958,
+          total_nodes: 144,
+          per_class: {},
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[94, 2], [1, 11]] },
+        },
+        rule_based_baseline: {
+          accuracy: 0.9931,
+          macro_precision: 0.985,
+          macro_recall: 0.99,
+          macro_f1: 0.987,
+          weighted_f1: 0.993,
+          total_nodes: 144,
+          per_class: {},
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[95, 1], [0, 12]] },
+        },
+      },
+      held_out_workload_metrics: {
+        gnn: {
+          accuracy: 0.9333,
+          macro_precision: 0.9,
+          macro_recall: 0.9,
+          macro_f1: 0.9,
+          weighted_f1: 0.93,
+          total_nodes: 15,
+          per_class: {},
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[9, 1], [0, 5]] },
+        },
+        rule_based_baseline: {
+          accuracy: 1.0,
+          macro_precision: 1.0,
+          macro_recall: 1.0,
+          macro_f1: 1.0,
+          weighted_f1: 1.0,
+          total_nodes: 15,
+          per_class: {},
+          confusion_matrix: { labels: ['none', 'sequential_scan'], matrix: [[10, 0], [0, 5]] },
+        },
+      },
+      known_limitations: [
+        'Trained and evaluated on synthetic and representative held-out EXPLAIN plans; not validated on live production customer workloads.',
+      ],
+    })
+
+    vi.spyOn(api, 'getRlEvaluation').mockResolvedValue({
+      model_name: 'DBZenith DQN Optimization Policy',
+      model_version: 'v0.8.0',
+      evaluation_version: 'phase9-rl-eval-v1',
+      evaluated_at: '2026-10-12T12:00:00Z',
+      dataset_type: 'SYNTHETIC_SANDBOX_SIMULATION_AND_MULTI_REGIME_OOD_WORKLOAD',
+      validated_on_real_workloads: false,
+      reproducibility: {
+        evaluation_seed: 20000,
+        python_version: '3.13.0',
+        torch_version: '2.6.0',
+        numpy_version: '2.2.0',
+        state_dim: 38,
+        action_dim: 6,
+        artifact_sha256_prefix: 'f1e2d3c4b5a69788',
+        metrics_reproducible_from_saved_predictions: true,
+      },
+      training_regression_investigation: {
+        artifact_found: true,
+        recorded_total_regressions: 303,
+        recorded_total_training_steps: 2221,
+        recorded_training_regression_rate_pct: 13.64,
+        recorded_action_counts: { PARTITION_TABLE: 846, DROP_INDEX: 245 },
+        partition_table_selection_share_pct: 38.09,
+        root_causes: [
+          'Exploratory DROP_INDEX when redundant_index_count==0 caused -60% latency regressions (303 total events).',
+        ],
+      },
+      held_out_in_distribution_comparison: {
+        rl_agent: {
+          total_actions: 500,
+          valid_action_rate_pct: 100.0,
+          regression_frequency_pct: 0.0,
+          failure_rate_pct: 0.0,
+          mean_reward: 17.5,
+          std_reward: 0.9,
+          reward_stability: { mean_reward: 17.5, std_reward: 0.9, median_reward: 17.6, iqr_reward: 1.1, min_reward: 15.0, max_reward: 19.2 },
+          improvement_distribution: {
+            latency_improvement_pct: { p10: 26, p25: 29, p50_median: 34, p75: 40, p90: 43, mean: 34.5, std: 5.2 },
+            throughput_improvement_pct: { p10: 35, p25: 41, p50_median: 52, p75: 66, p90: 76, mean: 54.0, std: 12.1 },
+          },
+          action_distribution: { PARTITION_TABLE: 483, REWRITE_QUERY: 17 },
+        },
+        baseline_policy: {
+          total_actions: 500,
+          valid_action_rate_pct: 100.0,
+          regression_frequency_pct: 0.0,
+          failure_rate_pct: 0.0,
+          mean_reward: 9.7,
+          std_reward: 0.5,
+          reward_stability: { mean_reward: 9.7, std_reward: 0.5, median_reward: 9.7, iqr_reward: 0.6, min_reward: 8.5, max_reward: 10.9 },
+          improvement_distribution: {
+            latency_improvement_pct: { p10: 16, p25: 20, p50_median: 25, p75: 30, p90: 34, mean: 25.2, std: 5.5 },
+            throughput_improvement_pct: { p10: 19, p25: 25, p50_median: 33, p75: 43, p90: 51, mean: 34.5, std: 9.8 },
+          },
+          action_distribution: { REWRITE_QUERY: 420, CREATE_INDEX: 80 },
+        },
+        no_change_policy: {
+          total_actions: 500,
+          valid_action_rate_pct: 100.0,
+          regression_frequency_pct: 0.0,
+          failure_rate_pct: 0.0,
+          mean_reward: 0.0,
+          std_reward: 0.0,
+          reward_stability: { mean_reward: 0, std_reward: 0, median_reward: 0, iqr_reward: 0, min_reward: 0, max_reward: 0 },
+          improvement_distribution: {
+            latency_improvement_pct: { p10: 0, p25: 0, p50_median: 0, p75: 0, p90: 0, mean: 0, std: 0 },
+            throughput_improvement_pct: { p10: 0, p25: 0, p50_median: 0, p75: 0, p90: 0, mean: 0, std: 0 },
+          },
+          action_distribution: { NO_OP: 500 },
+        },
+        random_policy: {
+          total_actions: 500,
+          valid_action_rate_pct: 84.0,
+          regression_frequency_pct: 10.6,
+          failure_rate_pct: 10.6,
+          mean_reward: 1.5,
+          std_reward: 4.1,
+          reward_stability: { mean_reward: 1.5, std_reward: 4.1, median_reward: 1.9, iqr_reward: 5.2, min_reward: -8.0, max_reward: 9.5 },
+          improvement_distribution: {
+            latency_improvement_pct: { p10: -12, p25: 0, p50_median: 18, p75: 31, p90: 41, mean: 14.3, std: 25.0 },
+            throughput_improvement_pct: { p10: -10, p25: 0, p50_median: 22, p75: 44, p90: 69, mean: 26.8, std: 32.0 },
+          },
+          action_distribution: { NO_OP: 85, CREATE_INDEX: 83, DROP_INDEX: 82, REWRITE_QUERY: 84, PARTITION_TABLE: 83, CHANGE_JOIN_STRATEGY: 83 },
+        },
+        markdown_table: '',
+      },
+      diverse_multi_regime_evaluation: {
+        scenario_count: 24,
+        regimes_covered: ['high_seq_scan_unindexed', 'small_table_nested_loop_ood'],
+        policy_summaries: {
+          raw_dqn_agent: {
+            total_actions: 24,
+            valid_action_rate_pct: 50.0,
+            regression_frequency_pct: 16.67,
+            failure_rate_pct: 16.67,
+            mean_reward: 0.51,
+            std_reward: 1.85,
+            reward_stability: { mean_reward: 0.51, std_reward: 1.85, median_reward: 1.2, iqr_reward: 0.8, min_reward: -3.05, max_reward: 1.8 },
+            improvement_distribution: {
+              latency_improvement_pct: { p10: -10, p25: 16, p50_median: 24, p75: 30, p90: 33, mean: 19.2, std: 14.5 },
+              throughput_improvement_pct: { p10: -9, p25: 19, p50_median: 31, p75: 42, p90: 49, mean: 26.4, std: 19.2 },
+            },
+            action_distribution: { REWRITE_QUERY: 20, PARTITION_TABLE: 4 },
+          },
+          safety_gated_dqn_agent: {
+            total_actions: 24,
+            valid_action_rate_pct: 100.0,
+            regression_frequency_pct: 0.0,
+            failure_rate_pct: 0.0,
+            mean_reward: 0.88,
+            std_reward: 0.65,
+            reward_stability: { mean_reward: 0.88, std_reward: 0.65, median_reward: 0.91, iqr_reward: 1.0, min_reward: 0.0, max_reward: 1.9 },
+            improvement_distribution: {
+              latency_improvement_pct: { p10: 0, p25: 5, p50_median: 24, p75: 31, p90: 36, mean: 19.8, std: 13.2 },
+              throughput_improvement_pct: { p10: 0, p25: 5, p50_median: 31, p75: 45, p90: 56, mean: 27.5, std: 19.1 },
+            },
+            action_distribution: { REWRITE_QUERY: 12, CHANGE_JOIN_STRATEGY: 4, NO_OP: 8 },
+          },
+        },
+      },
+      known_limitations: [
+        'RL outputs are advisory proposals only and cannot directly authorize or execute production DDL/DML changes.',
+      ],
+    })
+
+    vi.spyOn(api, 'analyzePlan').mockResolvedValue({
+      id: 99,
+      created_at: '2026-10-12T12:00:00Z',
+      query_id: 1,
+      structural_hash: 'hash_phase9_test',
+      sanitized_plan: {},
+      graph: {
+        root_id: 'n1',
+        nodes: [{ node_id: 'n1', node_type: 'Seq Scan', relation: 'orders', total_cost: 320, plan_rows: 10000 }],
+        edges: [],
+      },
+      features: { node_count: 1, total_cost: 320, seq_scan_fraction: 1.0 },
+      bottlenecks: [
+        {
+          type: 'sequential_scan',
+          severity: 'high',
+          affected_node: 'n1',
+          explanation: 'Full relation scan on orders.',
+          evidence: { total_cost: 320 },
+          possible_remediation: 'CREATE INDEX CONCURRENTLY ON orders (status);',
+        },
+      ],
+      explanation: {
+        summary: 'Seq Scan bottleneck',
+        gnn_summary: 'GNN classified sequential scan on orders (confidence: 96%) as the dominant bottleneck.',
+        feature_highlights: {},
+        method: 'GNN classification (GCN) + deterministic explanation layer',
+        gnn: {
+          model_version: 'v0.7.0-synth-20261003',
+          source_classification: 'LEARNED_MODEL',
+          is_fallback: false,
+          flagged_bottlenecks: [{ node_id: 'n1', prediction: 'sequential_scan', confidence: 0.96 }],
+        },
+      } as any,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/gnn']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByText(/SYNTHETIC \/ HELD-OUT EVAL ONLY — NOT VALIDATED ON REAL PRODUCTION WORKLOADS/i),
+    ).toBeInTheDocument()
+    expect(await screen.findByText(/Model Evaluation & Transparency Registry/i)).toBeInTheDocument()
+
+    // Trigger plan analysis
+    fireEvent.click(screen.getByRole('button', { name: /Analyze with GNN/i }))
+    expect(await screen.findByText(/hash_phase9_test/i)).toBeInTheDocument()
+
+    // Open Model Evaluation & Transparency tab
+    fireEvent.click(screen.getByRole('button', { name: /Model Evaluation & Transparency/i }))
+    expect(
+      await screen.findByText(/Part A: GNN Bottleneck Classifier Evaluation & Leakage Investigation/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/30 of the 80 validation nodes \(37.5%\) were byte-for-byte identical duplicates/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Part B: Reinforcement Learning Policy Evaluation & Training Regression Audit/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/safety_gated_dqn_agent/i)).toBeInTheDocument()
+  })
 })
+
+
 
 

@@ -1496,3 +1496,712 @@ export function updateUser(
     body: JSON.stringify(payload),
   })
 }
+
+// ============================================================================
+// Phase 8: PostgreSQL Index Portfolio Advisor & Workload Regression Alerts
+// ============================================================================
+
+export type IndexCatalogItem = {
+  schema_name: string
+  table_name: string
+  index_name: string
+  access_method: string
+  is_unique: boolean
+  is_primary: boolean
+  key_columns: string[]
+  include_columns: string[]
+  where_predicate?: string | null
+  indexdef: string
+  index_size_bytes: number
+  index_size_pretty: string
+  table_size_bytes: number
+  idx_scan: number
+  idx_tup_read: number
+  idx_tup_fetch: number
+  table_writes_total: number
+  usage_classification: string
+  supported_for_prefix_overlap: boolean
+  stats_available: boolean
+  created_at?: string | null
+}
+
+export type OverlappingIndexCandidate = {
+  candidate_type: 'duplicate_index' | 'overlapping_prefix_index' | string
+  label: string
+  requires_dba_review: boolean
+  auto_drop_permitted: boolean
+  schema_name: string
+  table_name: string
+  index_name: string
+  overlapping_with_index: string
+  access_method: string
+  narrow_columns: string[]
+  covering_columns: string[]
+  where_predicate?: string | null
+  index_size_bytes: number
+  index_size_pretty: string
+  idx_scan: number
+  covering_idx_scan: number
+  table_writes_total: number
+  confidence: number
+  risk_level: string
+  rationale: string
+  risk_notes: string
+  review_sql: string
+  evidence: Record<string, unknown>
+}
+
+export type LowUsageIndexCandidate = {
+  candidate_type: string
+  label: string
+  requires_dba_review: boolean
+  auto_drop_permitted: boolean
+  schema_name: string
+  table_name: string
+  index_name: string
+  access_method: string
+  key_columns: string[]
+  index_size_bytes: number
+  index_size_pretty: string
+  idx_scan: number
+  table_writes_total: number
+  stats_reset_at?: string | null
+  stats_age_hours?: number | null
+  stats_recently_reset: boolean
+  index_age_hours?: number | null
+  referenced_in_observed_workload: boolean
+  supporting_query_count: number
+  supporting_queries: Array<{
+    query_id: number
+    query_fingerprint: string
+    calls: number
+    mean_exec_time_ms: number
+  }>
+  confidence: number
+  risk_level: string
+  rationale: string
+  risk_notes: string
+  review_sql: string
+}
+
+export type ColumnAccessSummary = {
+  table_name: string
+  column_name: string
+  equality_filter_count: number
+  range_filter_count: number
+  join_count: number
+  order_by_count: number
+  group_by_count: number
+  total_weighted_calls: number
+  total_weighted_exec_ms: number
+  supporting_query_count: number
+  supporting_queries: Array<{
+    query_id: number
+    query_fingerprint: string
+    calls: number
+    mean_exec_time_ms: number
+    roles: string[]
+  }>
+  partial_predicates: string[]
+  selectivity?: {
+    n_distinct?: number | null
+    null_frac?: number | null
+    correlation?: number | null
+    estimated_selectivity_class?: string
+  } | null
+}
+
+export type MissingIndexProposal = {
+  candidate_type: 'composite_index' | 'partial_index' | 'single_column_index' | string
+  label: string
+  requires_dba_review: boolean
+  auto_drop_permitted: boolean
+  table_name: string
+  index_name: string
+  key_columns: string[]
+  where_predicate?: string | null
+  proposed_sql: string
+  expected_benefit_pct: number
+  confidence: number
+  risk_level: string
+  write_overhead_assessment: string
+  table_writes_total: number
+  existing_table_index_count: number
+  selectivity_notes: string[]
+  rationale: string
+  supporting_query_count: number
+  supporting_queries: Array<{
+    query_id: number
+    query_fingerprint: string
+    calls: number
+    mean_exec_time_ms: number
+    roles?: string[]
+  }>
+  catalog_observations: Record<string, unknown>
+}
+
+export type IndexPortfolioResponse = {
+  generated_at: string
+  read_only_analysis: boolean
+  auto_drop_enabled: boolean
+  governance_notice: string
+  statistics_status: {
+    stats_reset_at?: string | null
+    stats_age_hours?: number | null
+    stats_recently_reset: boolean
+    incomplete_statistics: boolean
+    catalog_reachable: boolean
+    warnings: string[]
+  }
+  summary: {
+    total_indexes: number
+    total_index_size_bytes: number
+    total_index_size_pretty: string
+    duplicate_or_overlapping_count: number
+    low_usage_candidate_count: number
+    missing_or_composite_proposals_count: number
+    unsupported_index_type_count: number
+    reclaimable_bytes_estimate: number
+    reclaimable_pretty_estimate: string
+  }
+  pagination: {
+    page: number
+    page_size: number
+    total_indexes: number
+    total_pages: number
+  }
+  indexes: IndexCatalogItem[]
+  overlapping_candidates: OverlappingIndexCandidate[]
+  low_usage_candidates: LowUsageIndexCandidate[]
+  column_access_analysis: ColumnAccessSummary[]
+  missing_index_proposals: MissingIndexProposal[]
+  unsupported_index_notices: Array<{
+    index_name: string
+    table_name: string
+    access_method: string
+    notice: string
+  }>
+  provenance_state: string
+  source_identifier: string
+  is_synthetic: boolean
+}
+
+export function getIndexPortfolio(params?: {
+  table_name?: string
+  usage_classification?: string
+  access_method?: string
+  search?: string
+  page?: number
+  page_size?: number
+}): Promise<IndexPortfolioResponse> {
+  const qs = new URLSearchParams()
+  if (params?.table_name) qs.set('table_name', params.table_name)
+  if (params?.usage_classification) qs.set('usage_classification', params.usage_classification)
+  if (params?.access_method) qs.set('access_method', params.access_method)
+  if (params?.search) qs.set('search', params.search)
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.page_size) qs.set('page_size', String(params.page_size))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return request(`/api/v1/index-portfolio${suffix}`)
+}
+
+export function analyzeIndexPortfolio(
+  persistCandidates: boolean = true,
+): Promise<{
+  status: string
+  persisted_recommendation_ids: number[]
+  persisted_count: number
+  portfolio: IndexPortfolioResponse
+}> {
+  return request(`/api/v1/index-portfolio/analyze?persist_candidates=${persistCandidates}`, {
+    method: 'POST',
+  })
+}
+
+export async function exportIndexPortfolio(format: 'json' | 'csv' = 'json'): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/index-portfolio/export?format=${format}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || `Export failed with status ${res.status}`)
+  }
+  return res.text()
+}
+
+export type SupportedAlertMetricInfo = {
+  label: string
+  unit: string
+  scope: string[]
+  default_operator: string
+  description: string
+}
+
+export type WorkloadAlertRuleItem = {
+  id: number
+  rule_key: string
+  name: string
+  description?: string | null
+  metric_name: string
+  scope: 'query' | 'workload' | string
+  query_fingerprint_filter?: string | null
+  comparison_operator: 'pct_increase' | 'abs_above' | 'pct_decrease' | 'both' | string
+  threshold_value: number
+  min_absolute_value: number
+  baseline_window_seconds: number
+  comparison_window_seconds: number
+  min_baseline_samples: number
+  min_comparison_samples: number
+  consecutive_breaches_required: number
+  allow_single_measurement: boolean
+  cooldown_seconds: number
+  auto_resolve: boolean
+  recovery_threshold_pct?: number | null
+  severity: 'critical' | 'high' | 'warning' | 'info' | string
+  enabled: boolean
+  created_by: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type AlertAuditEventItem = {
+  id: number
+  alert_id?: number | null
+  rule_id?: number | null
+  action: string
+  previous_status?: string | null
+  new_status?: string | null
+  actor_id: string
+  actor_username: string
+  actor_role: string
+  reason?: string | null
+  details: Record<string, unknown>
+  created_at?: string | null
+}
+
+export type WorkloadAlertItem = {
+  id: number
+  rule_id: number
+  rule_name?: string | null
+  dedup_key: string
+  status: 'active' | 'acknowledged' | 'resolved' | string
+  severity: 'critical' | 'high' | 'warning' | 'info' | string
+  metric_name: string
+  scope: string
+  title: string
+  summary: string
+  started_at?: string | null
+  last_observed_at?: string | null
+  occurrence_count: number
+  consecutive_breaches: number
+  baseline_value: number
+  current_value: number
+  threshold_value: number
+  deviation_pct?: number | null
+  baseline_sample_count: number
+  comparison_sample_count: number
+  affected_query_fingerprints: Array<{
+    query_id?: number
+    query_fingerprint: string
+    normalized_query?: string
+    calls?: number
+    mean_exec_time_ms?: number
+  }>
+  evidence: Record<string, unknown>
+  acknowledged_by?: string | null
+  acknowledged_at?: string | null
+  acknowledgment_note?: string | null
+  resolved_by?: string | null
+  resolved_at?: string | null
+  resolution_reason?: string | null
+  resolution_type?: string | null
+  provenance_state: string
+  source_identifier: string
+  is_synthetic: boolean
+  audit_history?: AlertAuditEventItem[]
+  rule?: WorkloadAlertRuleItem | null
+}
+
+export type WorkloadAlertsListResponse = {
+  items: WorkloadAlertItem[]
+  pagination: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+  }
+  status_counts: {
+    active: number
+    acknowledged: number
+    resolved: number
+    total: number
+  }
+  severity_counts: {
+    critical: number
+    high: number
+    warning: number
+    info: number
+  }
+  diagnostics: {
+    evaluated_at: string
+    insufficient_history: Array<Record<string, unknown>>
+    suppressed_evaluations: Array<Record<string, unknown>>
+    unsupported_metrics: Array<Record<string, unknown>>
+    supported_metrics: Record<string, SupportedAlertMetricInfo>
+  }
+}
+
+export function getAlertMetrics(): Promise<{
+  supported_metrics: Record<string, SupportedAlertMetricInfo>
+  supported_operators: string[]
+  supported_severities: string[]
+  supported_scopes: string[]
+  deterministic_policy_note: string
+}> {
+  return request('/api/v1/alerts/metrics')
+}
+
+export function getAlertRules(enabledOnly: boolean = false): Promise<{
+  items: WorkloadAlertRuleItem[]
+  total: number
+  supported_metrics: Record<string, SupportedAlertMetricInfo>
+}> {
+  return request(`/api/v1/alerts/rules?enabled_only=${enabledOnly}`)
+}
+
+export function createAlertRule(payload: {
+  name: string
+  description?: string
+  metric_name: string
+  scope?: string
+  query_fingerprint_filter?: string | null
+  comparison_operator?: string
+  threshold_value: number
+  min_absolute_value?: number
+  baseline_window_seconds?: number
+  comparison_window_seconds?: number
+  min_baseline_samples?: number
+  min_comparison_samples?: number
+  consecutive_breaches_required?: number
+  allow_single_measurement?: boolean
+  cooldown_seconds?: number
+  auto_resolve?: boolean
+  severity?: string
+  enabled?: boolean
+}): Promise<WorkloadAlertRuleItem> {
+  return request('/api/v1/alerts/rules', jsonBody(payload))
+}
+
+export function updateAlertRule(
+  ruleId: number,
+  payload: Partial<{
+    name: string
+    description: string
+    metric_name: string
+    scope: string
+    query_fingerprint_filter: string | null
+    comparison_operator: string
+    threshold_value: number
+    min_absolute_value: number
+    baseline_window_seconds: number
+    comparison_window_seconds: number
+    min_baseline_samples: number
+    min_comparison_samples: number
+    consecutive_breaches_required: number
+    allow_single_measurement: boolean
+    cooldown_seconds: number
+    auto_resolve: boolean
+    severity: string
+    enabled: boolean
+  }>,
+): Promise<WorkloadAlertRuleItem> {
+  return request(`/api/v1/alerts/rules/${ruleId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteAlertRule(ruleId: number): Promise<{ deleted: boolean; rule_id: number }> {
+  return request(`/api/v1/alerts/rules/${ruleId}`, { method: 'DELETE' })
+}
+
+export function evaluateWorkloadAlerts(ruleIds?: number[]): Promise<{
+  evaluated_at: string
+  rules_evaluated: number
+  triggered_count: number
+  deduplicated_count: number
+  auto_resolved_count: number
+  triggered_alert_ids: number[]
+  deduplicated_alert_ids: number[]
+  auto_resolved_alert_ids: number[]
+  suppressed_evaluations: Array<Record<string, unknown>>
+  insufficient_history: Array<Record<string, unknown>>
+  unsupported_metrics: Array<Record<string, unknown>>
+}> {
+  return request('/api/v1/alerts/evaluate', jsonBody({ rule_ids: ruleIds ?? null }))
+}
+
+export function getWorkloadAlerts(params?: {
+  status?: string
+  severity?: string
+  metric_name?: string
+  scope?: string
+  query_fingerprint?: string
+  search?: string
+  page?: number
+  page_size?: number
+  evaluate_now?: boolean
+}): Promise<WorkloadAlertsListResponse> {
+  const qs = new URLSearchParams()
+  if (params?.status) qs.set('status', params.status)
+  if (params?.severity) qs.set('severity', params.severity)
+  if (params?.metric_name) qs.set('metric_name', params.metric_name)
+  if (params?.scope) qs.set('scope', params.scope)
+  if (params?.query_fingerprint) qs.set('query_fingerprint', params.query_fingerprint)
+  if (params?.search) qs.set('search', params.search)
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.page_size) qs.set('page_size', String(params.page_size))
+  if (params?.evaluate_now !== undefined) qs.set('evaluate_now', String(params.evaluate_now))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return request(`/api/v1/alerts${suffix}`)
+}
+
+export function getWorkloadAlertDetail(alertId: number): Promise<WorkloadAlertItem> {
+  return request(`/api/v1/alerts/${alertId}`)
+}
+
+export function acknowledgeWorkloadAlert(
+  alertId: number,
+  reason: string,
+): Promise<WorkloadAlertItem> {
+  return request(`/api/v1/alerts/${alertId}/acknowledge`, jsonBody({ reason }))
+}
+
+export function resolveWorkloadAlert(
+  alertId: number,
+  reason: string,
+): Promise<WorkloadAlertItem> {
+  return request(`/api/v1/alerts/${alertId}/resolve`, jsonBody({ reason }))
+}
+
+export function getAlertAuditHistory(params?: {
+  alert_id?: number
+  rule_id?: number
+  action?: string
+  page?: number
+  page_size?: number
+}): Promise<{
+  items: AlertAuditEventItem[]
+  pagination: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+  }
+}> {
+  const qs = new URLSearchParams()
+  if (params?.alert_id) qs.set('alert_id', String(params.alert_id))
+  if (params?.rule_id) qs.set('rule_id', String(params.rule_id))
+  if (params?.action) qs.set('action', params.action)
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.page_size) qs.set('page_size', String(params.page_size))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return request(`/api/v1/alerts/audit/history${suffix}`)
+}
+
+export async function exportWorkloadAlerts(
+  format: 'json' | 'csv' = 'json',
+  status?: string,
+): Promise<string> {
+  const qs = new URLSearchParams({ format })
+  if (status) qs.set('status', status)
+  const res = await fetch(`${API_BASE_URL}/api/v1/alerts/export?${qs.toString()}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || `Export failed with status ${res.status}`)
+  }
+  return res.text()
+}
+
+// ============================================================================
+// Phase 9: GNN & RL Model Evaluation, Reliability & Transparency
+// ============================================================================
+
+export type GnnClassMetrics = {
+  precision: number
+  recall: number
+  f1: number
+  support: number
+}
+
+export type GnnClassificationReport = {
+  accuracy: number
+  macro_precision: number
+  macro_recall: number
+  macro_f1: number
+  weighted_f1: number
+  total_nodes: number
+  per_class: Record<string, GnnClassMetrics>
+  confusion_matrix: {
+    labels: string[]
+    matrix: number[][]
+  }
+}
+
+export type GnnEvaluationReport = {
+  model_name: string
+  model_version: string
+  evaluation_version: string
+  evaluated_at: string
+  dataset_type: string
+  validated_on_real_workloads: boolean
+  reproducibility: {
+    legacy_seed: number
+    evaluation_seed: number
+    python_version: string
+    torch_version: string
+    pyg_available: boolean
+    normalizer_version: number
+    feature_count: number
+    artifact_sha256_prefix: string | null
+    metrics_reproducible_from_saved_predictions: boolean
+  }
+  dataset_sizes: {
+    legacy_synthetic: {
+      total_graphs: number
+      train_graphs: number
+      validation_graphs: number
+      validation_nodes: number
+    }
+    grouped_leakage_free: {
+      total_graphs: number
+      train_graphs: number
+      train_nodes: number
+      validation_graphs: number
+      validation_nodes: number
+      test_graphs: number
+      test_nodes: number
+      held_out_workload_graphs: number
+      held_out_workload_nodes: number
+    }
+  }
+  legacy_perfect_score_investigation: {
+    reported_accuracy: number
+    reported_macro_f1: number
+    reproduced_legacy_validation?: GnnClassificationReport
+    leakage_and_shortcut_audit: Record<string, any>
+    explanation: string
+  }
+  grouped_leakage_audit: Record<string, any>
+  grouped_validation_metrics: {
+    gnn: GnnClassificationReport
+  }
+  grouped_test_metrics: {
+    gnn: GnnClassificationReport
+    mlp_baseline: GnnClassificationReport
+    rule_based_baseline: GnnClassificationReport
+  }
+  held_out_workload_metrics: {
+    gnn: GnnClassificationReport
+    rule_based_baseline: GnnClassificationReport
+    predictions?: Array<Record<string, any>>
+  }
+  known_limitations: string[]
+}
+
+export type RlPolicyEvalSummary = {
+  policy_name?: string
+  num_episodes?: number
+  total_actions: number
+  valid_action_rate_pct: number
+  regression_frequency_pct: number
+  regression_rate_pct?: number
+  failure_rate_pct: number
+  mean_reward: number
+  std_reward: number
+  reward_stability: {
+    mean_reward: number
+    std_reward: number
+    median_reward: number
+    iqr_reward: number
+    min_reward: number
+    max_reward: number
+  }
+  improvement_distribution: {
+    latency_improvement_pct: {
+      p10: number
+      p25: number
+      p50_median: number
+      p75: number
+      p90: number
+      mean: number
+      std: number
+    }
+    throughput_improvement_pct: {
+      p10: number
+      p25: number
+      p50_median: number
+      p75: number
+      p90: number
+      mean: number
+      std: number
+    }
+  }
+  action_distribution: Record<string, number>
+}
+
+export type RlEvaluationReport = {
+  model_name: string
+  model_version: string
+  evaluation_version: string
+  evaluated_at: string
+  dataset_type: string
+  validated_on_real_workloads: boolean
+  reproducibility: {
+    evaluation_seed: number
+    python_version: string
+    torch_version: string
+    numpy_version: string
+    state_dim: number
+    action_dim: number
+    artifact_sha256_prefix: string | null
+    metrics_reproducible_from_saved_predictions: boolean
+  }
+  training_regression_investigation: {
+    artifact_found: boolean
+    recorded_total_regressions: number
+    recorded_total_training_steps: number
+    recorded_training_regression_rate_pct: number
+    recorded_action_counts: Record<string, number>
+    partition_table_selection_share_pct: number
+    root_causes: string[]
+  }
+  held_out_in_distribution_comparison: {
+    rl_agent: RlPolicyEvalSummary
+    baseline_policy: RlPolicyEvalSummary
+    no_change_policy: RlPolicyEvalSummary
+    random_policy: RlPolicyEvalSummary
+    markdown_table: string
+  }
+  diverse_multi_regime_evaluation: {
+    scenario_count: number
+    regimes_covered: string[]
+    policy_summaries: Record<string, RlPolicyEvalSummary>
+  }
+  known_limitations: string[]
+}
+
+export function getGnnEvaluation(): Promise<GnnEvaluationReport> {
+  return request('/api/v1/plans/gnn/evaluation')
+}
+
+export function getRlEvaluation(): Promise<RlEvaluationReport> {
+  return request('/api/v1/rl/evaluation')
+}
+
+

@@ -1,3 +1,4 @@
+from app.models.alert import AlertAuditEvent, WorkloadAlert, WorkloadAlertRule
 from app.models.plan import PlanAnalysis
 from app.models.privacy import PrivacyAuditEvent
 from app.models.recommendation import OptimizationRecommendation, RecommendationAuditEvent
@@ -9,6 +10,7 @@ from app.models.simulation import OptimizationSimulation
 from app.models.security import User, SecurityAuditEvent
 
 __all__ = [
+    "AlertAuditEvent", "WorkloadAlert", "WorkloadAlertRule",
     "PlanAnalysis", "PrivacyAuditEvent", "OptimizationRecommendation", "RecommendationAuditEvent",
     "RelationStatistic", "SystemMetadata", "QueryStatistic", "WorkloadSnapshot", "OptimizationSimulation",
     "User", "SecurityAuditEvent",

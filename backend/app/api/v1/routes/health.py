@@ -97,6 +97,8 @@ def _probe_database_And_extensions(db: Session) -> dict[str, Any]:
     sandbox_mode = "unknown"
     probe_error: str | None = None
 
+    sandbox_error: str | None = None
+
     try:
         dialect = db.bind.dialect.name if db.bind is not None else "postgresql"
         db.execute(text("SELECT 1"))
@@ -145,8 +147,36 @@ def _probe_database_And_extensions(db: Session) -> dict[str, Any]:
                 except Exception:
                     pg_stat_statements_readable = False
 
-            sandbox_available = True
-            sandbox_mode = "hypopg_virtual_indexes" if hypopg_installed else "read_only_explain_sandbox"
+            # Probe the isolated sandbox database for connectivity and HypoPG availability
+            try:
+                from app.db.session import get_sandbox_engine
+
+                sb_engine = get_sandbox_engine()
+                with sb_engine.begin() as sb_conn:
+                    sb_conn.execute(text("SELECT 1"))
+                    sandbox_available = True
+                    try:
+                        avail = sb_conn.execute(
+                            text("SELECT 1 FROM pg_available_extensions WHERE name = 'hypopg'")
+                        ).scalar()
+                        if avail:
+                            sb_conn.execute(text("CREATE EXTENSION IF NOT EXISTS hypopg"))
+                    except Exception:
+                        pass
+                    sb_hypo = sb_conn.execute(
+                        text("SELECT extversion FROM pg_extension WHERE extname = 'hypopg'")
+                    ).scalar()
+                    if sb_hypo:
+                        hypopg_installed = True
+            except Exception as sb_exc:
+                sandbox_available = False
+                sandbox_error = sanitize_collection_error(str(sb_exc)) or "Sandbox database unreachable."
+
+            sandbox_mode = (
+                "hypopg_virtual_indexes"
+                if (sandbox_available and hypopg_installed)
+                else ("read_only_explain_sandbox" if sandbox_available else "analytical_fallback_offline")
+            )
         else:
             # SQLite / isolated test database mode
             server_version = f"{dialect} (isolated test engine)"
@@ -156,8 +186,13 @@ def _probe_database_And_extensions(db: Session) -> dict[str, Any]:
             pg_stat_statements_installed = False
             pg_stat_statements_readable = False
             hypopg_installed = False
-            sandbox_available = True
-            sandbox_mode = "analytical_plan_sandbox"
+            if "invalid" in settings.sandbox_database_url.lower() or "unreachable" in settings.sandbox_database_url.lower():
+                sandbox_available = False
+                sandbox_mode = "analytical_fallback_offline"
+                sandbox_error = "Configured sandbox database URL is unreachable."
+            else:
+                sandbox_available = True
+                sandbox_mode = "analytical_plan_sandbox"
     except Exception as exc:
         latency_ms = round((time.perf_counter() - start_t) * 1000.0, 2)
         probe_error = sanitize_collection_error(str(exc)) or "Database connectivity check failed."
@@ -194,6 +229,7 @@ def _probe_database_And_extensions(db: Session) -> dict[str, Any]:
             "available": sandbox_available,
             "mode": sandbox_mode,
             "dsn_masked": _mask_dsn(settings.sandbox_database_url),
+            "error": sandbox_error,
         },
         "error": probe_error,
     }

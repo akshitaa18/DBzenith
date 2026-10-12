@@ -22,6 +22,7 @@ const NAV_SECTIONS: NavSection[] = [
       { path: '/slow-queries', label: 'Slow Queries', icon: '⏱️', hint: 'Latency bottleneck telemetry' },
       { path: '/queries', label: 'Query Details', icon: '🔍', hint: 'Deep query metrics & traces' },
       { path: '/plans', label: 'Plan Viewer', icon: '🌲', hint: 'EXPLAIN visual tree & AST' },
+      { path: '/alerts', label: 'Workload Alerts', icon: '🚨', hint: 'Deterministic regression alerts' },
     ],
   },
   {
@@ -29,6 +30,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { path: '/gnn', label: 'GNN Model', icon: '🧠', hint: 'Graph Neural Network & RL' },
       { path: '/recommendations', label: 'Recommendations', icon: '💡', hint: 'Autonomous advisor engine' },
+      { path: '/index-portfolio', label: 'Index Portfolio', icon: '🗂️', hint: 'Overlap, low-usage & composite advisor' },
     ],
   },
   {
